@@ -1,0 +1,100 @@
+package config
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
+	"time"
+)
+
+type Config struct {
+	AppEnv                  string
+	HTTPAddr                string
+	DatabasePath            string
+	MediaDir                string
+	SessionTTL              time.Duration
+	MaxUploadBytes          int64
+	CookieSecure            bool
+	FFmpegPath              string
+	FFprobePath             string
+	MediaWorkerEnabled      bool
+	MediaWorkerPollInterval time.Duration
+	MediaProbeTimeout       time.Duration
+	HLSEnabled              bool
+	HLSTranscodeTimeout     time.Duration
+	HLSSegmentSeconds       int
+}
+
+func Load() (Config, error) {
+	ttl, err := time.ParseDuration(env("SESSION_TTL", "168h"))
+	if err != nil {
+		return Config{}, fmt.Errorf("SESSION_TTL: %w", err)
+	}
+	maxUpload, err := strconv.ParseInt(env("MAX_UPLOAD_BYTES", "536870912"), 10, 64)
+	if err != nil || maxUpload <= 0 {
+		return Config{}, fmt.Errorf("MAX_UPLOAD_BYTES must be a positive integer")
+	}
+	secure, err := strconv.ParseBool(env("COOKIE_SECURE", "false"))
+	if err != nil {
+		return Config{}, fmt.Errorf("COOKIE_SECURE: %w", err)
+	}
+	workerEnabled, err := strconv.ParseBool(env("MEDIA_WORKER_ENABLED", "true"))
+	if err != nil {
+		return Config{}, fmt.Errorf("MEDIA_WORKER_ENABLED: %w", err)
+	}
+	pollInterval, err := time.ParseDuration(env("MEDIA_WORKER_POLL_INTERVAL", "2s"))
+	if err != nil || pollInterval <= 0 {
+		return Config{}, fmt.Errorf("MEDIA_WORKER_POLL_INTERVAL must be a positive duration")
+	}
+	probeTimeout, err := time.ParseDuration(env("MEDIA_PROBE_TIMEOUT", "30s"))
+	if err != nil || probeTimeout <= 0 {
+		return Config{}, fmt.Errorf("MEDIA_PROBE_TIMEOUT must be a positive duration")
+	}
+	hlsEnabled, err := strconv.ParseBool(env("HLS_ENABLED", "true"))
+	if err != nil {
+		return Config{}, fmt.Errorf("HLS_ENABLED: %w", err)
+	}
+	hlsTimeout, err := time.ParseDuration(env("HLS_TRANSCODE_TIMEOUT", "30m"))
+	if err != nil || hlsTimeout <= 0 {
+		return Config{}, fmt.Errorf("HLS_TRANSCODE_TIMEOUT must be a positive duration")
+	}
+	hlsSegmentSeconds, err := strconv.Atoi(env("HLS_SEGMENT_SECONDS", "4"))
+	if err != nil || hlsSegmentSeconds < 2 || hlsSegmentSeconds > 10 {
+		return Config{}, fmt.Errorf("HLS_SEGMENT_SECONDS must be between 2 and 10")
+	}
+
+	databasePath, err := filepath.Abs(env("DATABASE_PATH", "./data/gvideo.db"))
+	if err != nil {
+		return Config{}, fmt.Errorf("resolve database path: %w", err)
+	}
+	mediaDir, err := filepath.Abs(env("MEDIA_DIR", "./media"))
+	if err != nil {
+		return Config{}, fmt.Errorf("resolve media dir: %w", err)
+	}
+
+	return Config{
+		AppEnv:                  env("APP_ENV", "development"),
+		HTTPAddr:                env("HTTP_ADDR", ":8080"),
+		DatabasePath:            databasePath,
+		MediaDir:                mediaDir,
+		SessionTTL:              ttl,
+		MaxUploadBytes:          maxUpload,
+		CookieSecure:            secure,
+		FFmpegPath:              env("FFMPEG_PATH", "ffmpeg"),
+		FFprobePath:             env("FFPROBE_PATH", "ffprobe"),
+		MediaWorkerEnabled:      workerEnabled,
+		MediaWorkerPollInterval: pollInterval,
+		MediaProbeTimeout:       probeTimeout,
+		HLSEnabled:              hlsEnabled,
+		HLSTranscodeTimeout:     hlsTimeout,
+		HLSSegmentSeconds:       hlsSegmentSeconds,
+	}, nil
+}
+
+func env(key, fallback string) string {
+	if value, ok := os.LookupEnv(key); ok && value != "" {
+		return value
+	}
+	return fallback
+}

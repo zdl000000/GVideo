@@ -1,0 +1,12 @@
+data
+media
+.gocache
+go-build
+tmp
+temp
+*.exe
+*.test
+*.out
+*.coverprofile
+*.prof
+*.log
