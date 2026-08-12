@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Hls from "hls.js";
 import {
   Bookmark,
@@ -16,6 +16,7 @@ import {
   History,
   Home,
   ImagePlus,
+  LayoutDashboard,
   LogIn,
   LogOut,
   Menu,
@@ -45,7 +46,7 @@ import {
 } from "lucide-react";
 import { Link, NavLink, Navigate, Outlet, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ApiError, api, setCSRFToken } from "./api";
-import type { AuthPayload, Comment, CreatorProfile, SubtitleTrack, User, Video, VideoPage as VideoPageData } from "./types";
+import type { AuthPayload, Comment, CreatorProfile, CreatorStats, SubtitleTrack, User, Video, VideoPage as VideoPageData } from "./types";
 
 type AuthMode = "login" | "register";
 type Theme = "light" | "dark";
@@ -78,6 +79,28 @@ const formatFileSize = (bytes: number) => bytes >= 1024 * 1024
 const pageFrom = (params: URLSearchParams) => Math.max(1, Number.parseInt(params.get("page") || "1", 10) || 1);
 
 const errorMessage = (error: unknown) => (error instanceof Error ? error.message : "请求失败，请稍后重试");
+
+const visibilityLabels: Record<Video["visibility"], string> = {
+  public: "公开",
+  unlisted: "不公开列出",
+  private: "仅自己可见"
+};
+
+const visibilityHelp: Record<Video["visibility"], string> = {
+  public: "会出现在首页、作者空间、搜索和关注动态中。",
+  unlisted: "不会进入公共列表，但获得链接的人可以观看。",
+  private: "只有你登录后可以访问视频和相关媒体。"
+};
+
+function Avatar({ username, src, size = "medium", className = "" }: { username: string; src?: string; size?: "small" | "medium" | "large"; className?: string }) {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [src]);
+  return (
+    <span className={`avatar avatar-${size} ${className}`.trim()} aria-hidden="true">
+      {src && !failed ? <img src={src} alt="" onError={() => setFailed(true)} /> : username.slice(0, 1).toUpperCase()}
+    </span>
+  );
+}
 
 interface PlayerQuality {
   index: number;
@@ -398,13 +421,20 @@ function VideoPlayer({ video }: { video: Video }) {
     else void element.requestPictureInPicture?.();
   };
   const subtitleTracks: SubtitleTrack[] = video.subtitle_tracks ?? [];
+  const subtitleTrackSignature = subtitleTracks.map((track) => `${track.id}:${track.is_default ? 1 : 0}:${track.url}`).join("|");
+  useEffect(() => {
+    setSelectedSubtitle((current) => {
+      if (current === null || subtitleTracks.some((track) => track.id === current)) return current;
+      return subtitleTracks.find((track) => track.is_default)?.id ?? null;
+    });
+  }, [subtitleTrackSignature]);
   useEffect(() => {
     const tracks = videoRef.current?.textTracks;
     if (!tracks) return;
     Array.from(tracks).forEach((track, index) => {
       track.mode = subtitleTracks[index]?.id === selectedSubtitle ? "showing" : "disabled";
     });
-  }, [selectedSubtitle, video.id, subtitleTracks.length]);
+  }, [selectedSubtitle, video.id, subtitleTrackSignature]);
   const selectSubtitle = (trackID: number | null) => {
     const tracks = videoRef.current?.textTracks;
     if (tracks) {
@@ -588,6 +618,8 @@ function App() {
     setAuth({ user: null, loading: false });
   };
 
+  const updateAuthUser = (user: User) => setAuth((current) => ({ ...current, user }));
+
   return (
     <Routes>
       <Route element={<Shell auth={auth} onLogout={clearAuth} theme={theme} onThemeChange={() => setTheme((current) => current === "light" ? "dark" : "light")} />}>
@@ -595,11 +627,12 @@ function App() {
         <Route path="latest" element={<LatestPage />} />
         <Route path="popular" element={<PopularPage />} />
         <Route path="following" element={<Protected auth={auth}><FollowingPage /></Protected>} />
-        <Route path="users/:id" element={<CreatorPage user={auth.user} />} />
+        <Route path="users/:id" element={<CreatorPage user={auth.user} onUserUpdated={updateAuthUser} />} />
         <Route path="video/:id" element={<VideoPage user={auth.user} />} />
         <Route path="auth" element={auth.user ? <Navigate to="/" replace /> : <AuthPage onAuth={applyAuth} />} />
         <Route path="upload" element={<Protected auth={auth}><UploadPage /></Protected>} />
         <Route path="me/videos" element={<Protected auth={auth}><MyVideosPage /></Protected>} />
+        <Route path="creator" element={<Protected auth={auth}><CreatorDashboard user={auth.user!} /></Protected>} />
         <Route path="*" element={<NotFound />} />
       </Route>
     </Routes>
@@ -618,8 +651,49 @@ function Shell({ auth, onLogout, theme, onThemeChange }: { auth: AuthState; onLo
   const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
+  const sidebarRef = useRef<HTMLElement>(null);
+  const wasMenuOpenRef = useRef(false);
+  const [isMobileSidebar, setIsMobileSidebar] = useState(() => window.matchMedia("(max-width: 920px)").matches);
 
   useEffect(() => setMenuOpen(false), [location.pathname, location.search]);
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(max-width: 920px)");
+    const update = () => setIsMobileSidebar(mediaQuery.matches);
+    update();
+    mediaQuery.addEventListener("change", update);
+    return () => mediaQuery.removeEventListener("change", update);
+  }, []);
+  useLayoutEffect(() => {
+    if (!menuOpen) {
+      if (wasMenuOpenRef.current) menuButtonRef.current?.focus();
+      wasMenuOpenRef.current = false;
+      return;
+    }
+    wasMenuOpenRef.current = true;
+    const first = sidebarRef.current?.querySelector<HTMLElement>("a,button,input,select,textarea,[tabindex]:not([tabindex='-1'])");
+    first?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setMenuOpen(false);
+        return;
+      }
+      if (event.key !== "Tab" || !sidebarRef.current) return;
+      const focusable = Array.from(sidebarRef.current.querySelectorAll<HTMLElement>("a,button,input,select,textarea,[tabindex]:not([tabindex='-1'])"));
+      if (!focusable.length) return;
+      const firstFocusable = focusable[0];
+      const lastFocusable = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === firstFocusable) {
+        event.preventDefault();
+        lastFocusable.focus();
+      } else if (!event.shiftKey && document.activeElement === lastFocusable) {
+        event.preventDefault();
+        firstFocusable.focus();
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [menuOpen]);
 
   const submitSearch = (event: FormEvent) => {
     event.preventDefault();
@@ -666,7 +740,7 @@ function Shell({ auth, onLogout, theme, onThemeChange }: { auth: AuthState; onLo
           <ThemeButton theme={theme} onChange={onThemeChange} />
           {auth.user ? (
             <>
-              <Link to={`/users/${auth.user.id}`} className="user-chip"><span>{auth.user.username.slice(0, 1).toUpperCase()}</span>{auth.user.username}</Link>
+              <Link to={`/users/${auth.user.id}`} className="user-chip"><Avatar username={auth.user.username} src={auth.user.avatar_url} size="small" />{auth.user.username}</Link>
               <Link to="/upload" className="primary-button compact"><Upload size={17} />投稿</Link>
               <button className="icon-button" onClick={logout} title="退出登录"><LogOut size={19} /></button>
             </>
@@ -674,18 +748,19 @@ function Shell({ auth, onLogout, theme, onThemeChange }: { auth: AuthState; onLo
             <Link to="/auth" className="primary-button compact"><LogIn size={17} />登录</Link>
           )}
         </nav>
-        <button className="mobile-menu-button icon-button" onClick={() => setMenuOpen((open) => !open)} title={menuOpen ? "关闭菜单" : "打开菜单"} aria-expanded={menuOpen} aria-controls="mobile-sidebar">
+        <button ref={menuButtonRef} className="mobile-menu-button icon-button" onClick={() => setMenuOpen((open) => !open)} title={menuOpen ? "关闭菜单" : "打开菜单"} aria-label={menuOpen ? "关闭菜单" : "打开菜单"} aria-expanded={menuOpen} aria-controls="mobile-sidebar">
           {menuOpen ? <X size={21} /> : <Menu size={21} />}
         </button>
       </header>
 
       <button className={`sidebar-scrim ${menuOpen ? "open" : ""}`} onClick={() => setMenuOpen(false)} aria-label="关闭菜单" tabIndex={menuOpen ? 0 : -1} />
 
-      <aside id="mobile-sidebar" className={`sidebar ${menuOpen ? "open" : ""}`}>
+      <aside ref={sidebarRef} id="mobile-sidebar" className={`sidebar ${menuOpen ? "open" : ""}`} aria-hidden={isMobileSidebar && !menuOpen} inert={isMobileSidebar && !menuOpen ? true : undefined}>
         <nav aria-label="主导航">
           <NavItem to="/" icon={<Home size={19} />} label="首页" end />
           <NavItem to="/popular" icon={<Compass size={19} />} label="热门发现" />
           {auth.user && <NavItem to="/following" icon={<Users size={19} />} label="关注动态" />}
+          {auth.user && <NavItem to="/creator" icon={<LayoutDashboard size={19} />} label="创作者中心" />}
           <NavItem to={auth.user ? "/me/videos" : "/auth?next=/me/videos"} icon={<Film size={19} />} label="我的投稿" />
           <NavItem to={auth.user ? "/upload" : "/auth?next=/upload"} icon={<Upload size={19} />} label="发布视频" />
         </nav>
@@ -696,7 +771,7 @@ function Shell({ auth, onLogout, theme, onThemeChange }: { auth: AuthState; onLo
           </button>
           {auth.user ? (
             <>
-              <Link to={`/users/${auth.user.id}`} className="user-chip"><span>{auth.user.username.slice(0, 1).toUpperCase()}</span><b>{auth.user.username}</b></Link>
+              <Link to={`/users/${auth.user.id}`} className="user-chip"><Avatar username={auth.user.username} src={auth.user.avatar_url} size="small" /><b>{auth.user.username}</b></Link>
               <button className="secondary-button" onClick={logout}><LogOut size={17} />退出登录</button>
             </>
           ) : (
@@ -763,10 +838,12 @@ function HomePage() {
   useEffect(() => {
     setLoading(true);
     setError("");
+    const controller = new AbortController();
     const params = new URLSearchParams({ sort: "latest", page: String(page), page_size: "36" });
     if (query) params.set("q", query);
     if (category) params.set("category", category);
-    api.videos(params).then(setResult).catch((err) => setError(errorMessage(err))).finally(() => setLoading(false));
+    api.videos(params, controller.signal).then(setResult).catch((err) => { if (!controller.signal.aborted) setError(errorMessage(err)); }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => controller.abort();
   }, [query, category, page]);
 
   const featured = page === 1 ? videos.slice(0, 5) : [];
@@ -870,10 +947,12 @@ function LatestPage() {
   useEffect(() => {
     setLoading(true);
     setError("");
+    const controller = new AbortController();
     const params = new URLSearchParams({ sort: "latest", page: String(page), page_size: "36" });
     if (query) params.set("q", query);
     if (category) params.set("category", category);
-    api.videos(params).then(setResult).catch((err) => setError(errorMessage(err))).finally(() => setLoading(false));
+    api.videos(params, controller.signal).then(setResult).catch((err) => { if (!controller.signal.aborted) setError(errorMessage(err)); }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => controller.abort();
   }, [query, category, page]);
 
   const setCategory = (value: string) => {
@@ -950,10 +1029,12 @@ function PopularPage() {
   useEffect(() => {
     setLoading(true);
     setError("");
+    const controller = new AbortController();
     const params = new URLSearchParams({ sort: "popular", page: String(page), page_size: "36" });
     if (query) params.set("q", query);
     if (category) params.set("category", category);
-    api.videos(params).then(setResult).catch((err) => setError(errorMessage(err))).finally(() => setLoading(false));
+    api.videos(params, controller.signal).then(setResult).catch((err) => { if (!controller.signal.aborted) setError(errorMessage(err)); }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => controller.abort();
   }, [query, category, page]);
 
   const setCategory = (value: string) => {
@@ -1024,10 +1105,12 @@ function FollowingPage() {
   useEffect(() => {
     setLoading(true);
     setError("");
-    api.followingVideos(new URLSearchParams({ page: String(page), page_size: "24" }))
+    const controller = new AbortController();
+    api.followingVideos(new URLSearchParams({ page: String(page), page_size: "24" }), controller.signal)
       .then(setResult)
-      .catch((err) => setError(errorMessage(err)))
-      .finally(() => setLoading(false));
+      .catch((err) => { if (!controller.signal.aborted) setError(errorMessage(err)); })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => controller.abort();
   }, [page]);
 
   const setPage = (value: number) => {
@@ -1053,7 +1136,7 @@ function FollowingPage() {
   );
 }
 
-function CreatorPage({ user }: { user: User | null }) {
+function CreatorPage({ user, onUserUpdated }: { user: User | null; onUserUpdated: (user: User) => void }) {
   const { id = "" } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
@@ -1063,18 +1146,23 @@ function CreatorPage({ user }: { user: User | null }) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [editingProfile, setEditingProfile] = useState(false);
+  const editProfileButtonRef = useRef<HTMLButtonElement>(null);
   const page = pageFrom(searchParams);
 
   useEffect(() => {
+    const controller = new AbortController();
     setLoading(true);
     setError("");
     Promise.all([
-      api.creator(id),
-      api.creatorVideos(id, new URLSearchParams({ page: String(page), page_size: "12" }))
+      api.creator(id, controller.signal),
+      api.creatorVideos(id, new URLSearchParams({ page: String(page), page_size: "12" }), controller.signal)
     ]).then(([nextProfile, nextVideos]) => {
+      if (controller.signal.aborted) return;
       setProfile(nextProfile);
       setResult(nextVideos);
-    }).catch((err) => setError(errorMessage(err))).finally(() => setLoading(false));
+    }).catch((err) => { if (!controller.signal.aborted) setError(errorMessage(err)); }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => controller.abort();
   }, [id, page]);
 
   const setPage = (value: number) => {
@@ -1114,7 +1202,7 @@ function CreatorPage({ user }: { user: User | null }) {
   return (
     <div className="page creator-page">
       <section className="creator-hero" aria-labelledby="creator-name">
-        <span className="creator-hero-avatar" aria-hidden="true">{profile.username.slice(0, 1).toUpperCase()}</span>
+        <Avatar username={profile.username} src={profile.avatar_url} size="large" className="creator-hero-avatar" />
         <div className="creator-identity">
           <p className="eyebrow">作者空间</p>
           <h1 id="creator-name">{profile.username}</h1>
@@ -1128,7 +1216,11 @@ function CreatorPage({ user }: { user: User | null }) {
         </dl>
         <div className="creator-action">
           {isSelf ? (
-            <Link to="/me/videos" className="primary-button"><Film size={17} />管理投稿</Link>
+            <>
+              <button ref={editProfileButtonRef} type="button" className="secondary-button" onClick={() => setEditingProfile(true)}><Pencil size={17} />编辑资料</button>
+              <Link to="/creator" className="secondary-button"><LayoutDashboard size={17} />创作者中心</Link>
+              <Link to="/me/videos" className="primary-button"><Film size={17} />管理投稿</Link>
+            </>
           ) : (
             <button type="button" className={profile.followed ? "secondary-button follow-button active" : "primary-button follow-button"} disabled={busy} onClick={toggleFollow} aria-pressed={profile.followed}>
               {profile.followed ? <Check size={17} /> : <UserRound size={17} />}{busy ? "处理中..." : profile.followed ? "已关注" : "关注"}
@@ -1143,6 +1235,120 @@ function CreatorPage({ user }: { user: User | null }) {
       ) : (
         <EmptyState icon={<Film size={28} />} title="还没有公开投稿" text={isSelf ? "发布第一条作品，让个人空间丰富起来。" : "这位创作者发布作品后会显示在这里。"} action={isSelf ? <Link to="/upload" className="primary-button"><Upload size={17} />发布视频</Link> : <Link to="/popular" className="secondary-button"><Compass size={17} />浏览热门</Link>} />
       )}
+      {editingProfile && (
+        <EditProfileDialog
+          profile={profile}
+          onClose={() => { setEditingProfile(false); window.setTimeout(() => editProfileButtonRef.current?.focus(), 0); }}
+          onSaved={(updated) => {
+            setProfile((current) => current ? { ...current, ...updated } : current);
+            onUserUpdated(updated);
+            setEditingProfile(false);
+            window.setTimeout(() => editProfileButtonRef.current?.focus(), 0);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function useDialogFocus(panelRef: React.RefObject<HTMLElement | null>, busy: boolean, onClose: () => void) {
+  const busyRef = useRef(busy);
+  const closeRef = useRef(onClose);
+  busyRef.current = busy;
+  closeRef.current = onClose;
+
+  useEffect(() => {
+    const panel = panelRef.current;
+    if (!panel) return;
+    const backdrop = panel.closest<HTMLElement>(".dialog-backdrop");
+    const background: HTMLElement[] = [];
+    let foreground: HTMLElement | null = backdrop;
+    while (foreground?.parentElement) {
+      background.push(...Array.from(foreground.parentElement.children).filter((child) => child !== foreground) as HTMLElement[]);
+      foreground = foreground.parentElement;
+      if (foreground === document.body) break;
+    }
+    const previous = background.map((element) => ({ element, inert: element.inert, hidden: element.getAttribute("aria-hidden") }));
+    background.forEach((element) => { element.inert = true; element.setAttribute("aria-hidden", "true"); });
+    const focusableSelector = "input,textarea,button,select,a[href],[tabindex]:not([tabindex='-1'])";
+    panel.querySelector<HTMLElement>(focusableSelector)?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !busyRef.current) {
+        event.preventDefault();
+        closeRef.current();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = Array.from(panel.querySelectorAll<HTMLElement>(focusableSelector)).filter((element) => !element.hasAttribute("disabled"));
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      previous.forEach(({ element, inert, hidden }) => {
+        element.inert = inert;
+        if (hidden === null) element.removeAttribute("aria-hidden"); else element.setAttribute("aria-hidden", hidden);
+      });
+    };
+  }, [panelRef]);
+}
+
+function EditProfileDialog({ profile, onClose, onSaved }: { profile: CreatorProfile; onClose: () => void; onSaved: (user: User) => void }) {
+  const avatarRef = useRef<HTMLInputElement>(null);
+  const [username, setUsername] = useState(profile.username);
+  const [bio, setBio] = useState(profile.bio);
+  const [avatar, setAvatar] = useState<File | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const panelRef = useRef<HTMLElement>(null);
+  const avatarPreview = useMemo(() => avatar ? URL.createObjectURL(avatar) : profile.avatar_url, [avatar, profile.avatar_url]);
+
+  useEffect(() => () => { if (avatar) URL.revokeObjectURL(avatarPreview); }, [avatar, avatarPreview]);
+  useDialogFocus(panelRef, busy, onClose);
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    const form = new FormData();
+    form.set("username", username);
+    form.set("bio", bio);
+    if (avatar) form.set("avatar", avatar);
+    try {
+      onSaved(await api.updateProfile(form));
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onClose(); }}>
+      <section ref={panelRef} className="dialog-panel profile-dialog" role="dialog" aria-modal="true" aria-labelledby="profile-dialog-title">
+        <header>
+          <div><p className="eyebrow">个人资料</p><h2 id="profile-dialog-title">编辑作者信息</h2></div>
+          <button type="button" className="icon-button" onClick={onClose} disabled={busy} aria-label="关闭资料编辑窗口" title="关闭"><X size={19} /></button>
+        </header>
+        <form className="profile-form" onSubmit={submit}>
+          <div className="profile-avatar-editor">
+            <Avatar username={username || profile.username} src={avatarPreview} size="large" />
+            <button type="button" className="secondary-button compact" onClick={() => avatarRef.current?.click()}><ImagePlus size={16} />更换头像</button>
+            <span>JPEG、PNG 或 WebP</span>
+            <input ref={avatarRef} className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setAvatar(event.target.files?.[0] || null)} />
+          </div>
+          <div className="stack-form profile-fields">
+            <label>用户名<input autoFocus value={username} onChange={(event) => setUsername(event.target.value)} minLength={3} maxLength={24} required /></label>
+            <label>个人简介<textarea value={bio} onChange={(event) => setBio(event.target.value)} maxLength={300} rows={6} placeholder="介绍你的内容方向和创作经历" /><span className="field-count">{bio.length}/300</span></label>
+            {error && <p className="inline-error">{error}</p>}
+            <div className="dialog-actions"><button type="button" className="secondary-button" onClick={onClose} disabled={busy}>取消</button><button className="primary-button" disabled={busy}>{busy ? "保存中..." : "保存资料"}</button></div>
+          </div>
+        </form>
+      </section>
     </div>
   );
 }
@@ -1157,27 +1363,67 @@ function VideoCard({ video }: { video: Video }) {
       </Link>
       <div className="video-card-body">
         <Link to={`/video/${video.id}`} className="video-title">{video.title}</Link>
-        <div className="video-author"><Link to={`/users/${video.user_id}`} className="video-author-link"><span className="mini-avatar">{video.username.slice(0, 1)}</span><span>{video.username}</span></Link><span className="category-label">{video.category}</span></div>
+        <div className="video-author"><Link to={`/users/${video.user_id}`} className="video-author-link"><Avatar username={video.username} src={video.avatar_url} size="small" /><span>{video.username}</span></Link><span className="category-label">{video.category}</span></div>
         <div className="video-stats"><span><Eye size={14} />{formatCount(video.views_count)}</span><span><MessageCircle size={14} />{formatCount(video.comments_count)}</span><time>{formatDate(video.created_at)}</time></div>
       </div>
     </article>
   );
 }
 
-const processingLabels: Record<Video["processing_status"], string> = {
-  pending: "等待媒体探测",
-  processing: "正在探测媒体",
-  ready: "可播放",
-  failed: "媒体处理失败"
+type ProcessingStageKey = "queued" | "probing" | "transcoding" | "finalizing" | "completed" | "failed" | "processing";
+
+const processingStageLabels: Record<ProcessingStageKey, string> = {
+  queued: "排队中",
+  probing: "探测媒体",
+  transcoding: "转码中",
+  finalizing: "收尾中",
+  completed: "已完成",
+  failed: "处理失败",
+  processing: "处理中"
 };
 
+function processingStage(video: Video): ProcessingStageKey {
+  if (video.processing_status === "failed") return "failed";
+  if (video.processing_status === "ready") return "completed";
+  const stage = (video.processing_stage || "").trim().toLowerCase();
+  if (["queued", "queue", "pending", "waiting"].includes(stage)) return "queued";
+  if (["probing", "probe", "analyzing", "analysing"].includes(stage)) return "probing";
+  if (["transcoding", "transcode", "encoding"].includes(stage)) return "transcoding";
+  if (["finalizing", "finalize", "packaging", "finishing"].includes(stage)) return "finalizing";
+  if (["completed", "complete", "ready", "done"].includes(stage)) return "completed";
+  if (["failed", "error"].includes(stage)) return "failed";
+  return video.processing_status === "pending" ? "queued" : "processing";
+}
+
+const processingProgress = (video: Video) =>
+  Math.min(100, Math.max(0, Math.round(Number.isFinite(video.processing_progress) ? video.processing_progress : 0)));
+
 function ProcessingBadge({ video }: { video: Video }) {
-  const icon = video.processing_status === "ready"
+  const stage = processingStage(video);
+  const icon = stage === "completed"
     ? <CircleCheck size={13} />
-    : video.processing_status === "failed"
+    : stage === "failed"
       ? <CircleAlert size={13} />
       : <Clock3 size={13} />;
-  return <span className={`processing-badge ${video.processing_status}`}>{icon}{processingLabels[video.processing_status]}</span>;
+  return <span className={`processing-badge ${video.processing_status} stage-${stage}`}>{icon}{processingStageLabels[stage]}</span>;
+}
+
+function ProcessingProgress({ video, compact = false }: { video: Video; compact?: boolean }) {
+  const progress = processingProgress(video);
+  const stage = processingStage(video);
+  return (
+    <div
+      className={`processing-progress ${compact ? "compact-progress" : ""}`}
+      role="progressbar"
+      aria-label={`媒体${processingStageLabels[stage]}进度`}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={progress}
+    >
+      <div className="processing-progress-copy"><span>{processingStageLabels[stage]}</span><strong>{progress}%</strong></div>
+      <div className="processing-progress-track" aria-hidden="true"><span style={{ width: `${progress}%` }} /></div>
+    </div>
+  );
 }
 
 function Pagination({ page, pageSize, total, hasNext, onPageChange }: { page: number; pageSize: number; total: number; hasNext: boolean; onPageChange: (page: number) => void }) {
@@ -1210,29 +1456,36 @@ function VideoPage({ user }: { user: User | null }) {
   const [shareStatus, setShareStatus] = useState("");
 
   useEffect(() => {
+    const controller = new AbortController();
     setLoading(true);
     setRelatedLoading(true);
+    setError("");
     setRelatedVideos([]);
-    Promise.all([api.video(id), api.comments(id)])
+    Promise.all([api.video(id, true, controller.signal), api.comments(id, controller.signal)])
       .then(([nextVideo, nextComments]) => {
+        if (controller.signal.aborted) return;
         setVideo(nextVideo);
         setComments(nextComments);
         const params = new URLSearchParams({ sort: "popular", limit: "12", category: nextVideo.category });
-        api.videos(params)
-          .then((related) => setRelatedVideos(related.items.filter((item) => item.id !== nextVideo.id).slice(0, 8)))
-          .catch(console.error)
-          .finally(() => setRelatedLoading(false));
+        api.videos(params, controller.signal)
+          .then((related) => { if (!controller.signal.aborted) setRelatedVideos(related.items.filter((item) => item.id !== nextVideo.id).slice(0, 8)); })
+          .catch((err) => { if (!controller.signal.aborted) console.error(err); })
+          .finally(() => { if (!controller.signal.aborted) setRelatedLoading(false); });
       })
-      .catch((err) => setError(errorMessage(err)))
-      .finally(() => setLoading(false));
+      .catch((err) => { if (!controller.signal.aborted) setError(errorMessage(err)); })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => controller.abort();
   }, [id]);
 
   useEffect(() => {
     if (!video || (video.processing_status !== "pending" && video.processing_status !== "processing")) return;
+    const controller = new AbortController();
     const timer = window.setInterval(() => {
-      api.video(id, false).then(setVideo).catch(console.error);
+      api.video(id, false, controller.signal)
+        .then((nextVideo) => { if (!controller.signal.aborted) setVideo(nextVideo); })
+        .catch((err) => { if (!controller.signal.aborted) console.error(err); });
     }, 2500);
-    return () => window.clearInterval(timer);
+    return () => { controller.abort(); window.clearInterval(timer); };
   }, [id, video?.processing_status]);
 
   const requireUser = () => {
@@ -1300,7 +1553,15 @@ function VideoPage({ user }: { user: User | null }) {
             <div><p className="eyebrow">{video.category}</p><h1>{video.title}</h1><div className="watch-meta"><span><Eye size={15} />{formatCount(video.views_count)} 播放</span><span><Clock3 size={15} />{formatDate(video.created_at)}</span>{video.processing_status === "ready" && video.source_width > 0 && <span>{video.source_width} × {video.source_height}</span>}</div></div>
           </div>
           <VideoPlayer video={video} />
-          {video.processing_status !== "ready" && <div className={`processing-notice ${video.processing_status}`}><ProcessingBadge video={video} /><span>{video.processing_status === "failed" ? "HLS 处理失败，原始文件仍可播放；请检查 FFmpeg、FFprobe 配置和后台日志。" : "原始文件已保存并可播放，后台正在分析媒体并生成自适应清晰度。"}</span></div>}
+          {video.processing_status !== "ready" && (
+            <div className={`processing-notice ${video.processing_status}`}>
+              <div className="processing-notice-copy">
+                <ProcessingBadge video={video} />
+                <span>{video.processing_status === "failed" ? (video.processing_error || "媒体处理失败，原始文件仍可播放。") : "原始文件已保存并可播放，后台正在生成自适应清晰度。"}</span>
+              </div>
+              {(video.processing_status === "pending" || video.processing_status === "processing") && <ProcessingProgress video={video} />}
+            </div>
+          )}
           <div className="watch-action-row">
             <div className="watch-actions">
               <button className={video.liked ? "active" : ""} disabled={busy === "like"} onClick={() => toggle("like")}><Heart size={19} fill={video.liked ? "currentColor" : "none"} />{formatCount(video.likes_count)}</button>
@@ -1310,9 +1571,9 @@ function VideoPage({ user }: { user: User | null }) {
             {shareStatus && <span className="share-feedback" role="status">{shareStatus}</span>}
           </div>
           {error && <p className="inline-error">{error}</p>}
-          <div className="creator-strip"><Link to={`/users/${video.user_id}`} className="creator-avatar" aria-label={`查看 ${video.username} 的作者空间`}>{video.username.slice(0, 1)}</Link><div><Link to={`/users/${video.user_id}`} className="creator-name-link">{video.username}</Link><span>创作者</span></div></div>
+          <div className="creator-strip"><Link to={`/users/${video.user_id}`} aria-label={`查看 ${video.username} 的作者空间`}><Avatar username={video.username} src={video.avatar_url} size="medium" /></Link><div><Link to={`/users/${video.user_id}`} className="creator-name-link">{video.username}</Link><span>创作者</span></div></div>
           {video.description && <p className="video-description">{video.description}</p>}
-          {user?.id === video.user_id && <SubtitleManager video={video} onAdded={(track) => setVideo((current) => current ? { ...current, subtitle_tracks: [...(current.subtitle_tracks ?? []), track] } : current)} />}
+          {user?.id === video.user_id && <SubtitleManager video={video} onTracksChanged={(tracks) => setVideo((current) => current ? { ...current, subtitle_tracks: tracks } : current)} />}
           <section className="comment-section" aria-labelledby="comments-title">
             <div className="comment-heading"><h2 id="comments-title">评论</h2><span>{video.comments_count}</span></div>
             <form className="comment-form" onSubmit={submitComment}>
@@ -1320,7 +1581,7 @@ function VideoPage({ user }: { user: User | null }) {
               <button className="primary-button compact" disabled={!content.trim() || busy === "comment"}><Send size={16} />发布</button>
             </form>
             <div className="comment-list">
-              {comments.length ? comments.map((comment) => <div className="comment-item" key={comment.id}><Link to={`/users/${comment.user_id}`} className="mini-avatar" aria-label={`查看 ${comment.username} 的作者空间`}>{comment.username.slice(0, 1)}</Link><div><Link to={`/users/${comment.user_id}`} className="comment-author-link">{comment.username}</Link><p>{comment.content}</p><time>{formatDate(comment.created_at)}</time></div></div>) : <p className="comment-empty">还没有评论，来聊第一句。</p>}
+              {comments.length ? comments.map((comment) => <div className="comment-item" key={comment.id}><Link to={`/users/${comment.user_id}`} aria-label={`查看 ${comment.username} 的作者空间`}><Avatar username={comment.username} src={comment.avatar_url} size="small" /></Link><div><Link to={`/users/${comment.user_id}`} className="comment-author-link">{comment.username}</Link><p>{comment.content}</p><time>{formatDate(comment.created_at)}</time></div></div>) : <p className="comment-empty">还没有评论，来聊第一句。</p>}
             </div>
           </section>
         </div>
@@ -1348,33 +1609,109 @@ function RelatedVideoCard({ video }: { video: Video }) {
       </Link>
       <div className="related-copy">
         <Link to={`/video/${video.id}`} className="related-title">{video.title}</Link>
-        <Link to={`/users/${video.user_id}`} className="related-author">{video.username}</Link>
+        <Link to={`/users/${video.user_id}`} className="related-author"><Avatar username={video.username} src={video.avatar_url} size="small" /><span>{video.username}</span></Link>
         <span><Eye size={13} />{formatCount(video.views_count)} 播放</span>
       </div>
     </article>
   );
 }
 
-function SubtitleManager({ video, onAdded }: { video: Video; onAdded: (track: SubtitleTrack) => void }) {
+function SubtitleManager({ video, onTracksChanged }: { video: Video; onTracksChanged: (tracks: SubtitleTrack[]) => void }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [language, setLanguage] = useState("zh-CN");
+  const [label, setLabel] = useState("中文");
+  const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const tracks = video.subtitle_tracks ?? [];
+
+  const showNotice = (message: string) => {
+    setNotice(message);
+    window.setTimeout(() => setNotice(""), 2500);
+  };
+
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (!file) return;
-    setBusy(true); setError("");
+    setBusy("upload"); setError(""); setNotice("");
     const form = new FormData();
-    form.set("subtitle", file); form.set("subtitle_language", "zh-CN"); form.set("subtitle_label", "中文");
-    try { onAdded(await api.uploadSubtitle(video.id, form)); setFile(null); if (inputRef.current) inputRef.current.value = ""; }
-    catch (err) { setError(errorMessage(err)); } finally { setBusy(false); }
+    form.set("subtitle", file);
+    form.set("subtitle_language", language.trim() || "zh-CN");
+    form.set("subtitle_label", label.trim() || language.trim() || "字幕");
+    try {
+      const created = await api.uploadSubtitle(video.id, form);
+      const nextTracks = created.is_default
+        ? [...tracks.map((track) => ({ ...track, is_default: false })), created]
+        : [...tracks, created];
+      onTracksChanged(nextTracks);
+      setFile(null);
+      if (inputRef.current) inputRef.current.value = "";
+      showNotice("字幕轨道已上传");
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy("");
+    }
   };
-  return <form className="subtitle-manager" onSubmit={submit}>
-    <div><strong>字幕管理</strong><span>为作品补传 VTT 或 SRT 字幕，最大 2 MB</span></div>
-    <input ref={inputRef} type="file" accept=".vtt,.srt,text/vtt,application/x-subrip" onChange={(event) => setFile(event.target.files?.[0] || null)} />
-    <button className="secondary-button compact" disabled={!file || busy}>{busy ? "上传中..." : "上传字幕"}</button>
-    {error && <p className="inline-error">{error}</p>}
-  </form>;
+
+  const setDefault = async (track: SubtitleTrack) => {
+    setBusy(`default-${track.id}`); setError(""); setNotice("");
+    try {
+      onTracksChanged(await api.setDefaultSubtitle(video.id, track.id));
+      showNotice(`已将“${track.label}”设为默认字幕`);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const remove = async (track: SubtitleTrack) => {
+    if (!window.confirm(`确定删除字幕轨道“${track.label}”吗？`)) return;
+    setBusy(`delete-${track.id}`); setError(""); setNotice("");
+    try {
+      onTracksChanged(await api.deleteSubtitle(video.id, track.id));
+      showNotice(`已删除“${track.label}”字幕`);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy("");
+    }
+  };
+
+  return (
+    <section className="subtitle-manager" aria-labelledby={`subtitle-manager-${video.id}`} aria-busy={Boolean(busy)}>
+      <header>
+        <div><strong id={`subtitle-manager-${video.id}`}>字幕管理</strong><span>管理语言轨道与默认字幕，支持 VTT 或 SRT，最大 2 MB</span></div>
+        <span>{tracks.length} 条轨道</span>
+      </header>
+      {tracks.length ? (
+        <div className="subtitle-track-list">
+          {tracks.map((track) => (
+            <article className="subtitle-track-row" key={track.id}>
+              <div className="subtitle-track-copy">
+                <strong>{track.label}</strong>
+                <span><code>{track.language}</code>{track.is_default && <b><CircleCheck size={13} />默认</b>}</span>
+              </div>
+              <div className="subtitle-track-actions">
+                {!track.is_default && <button type="button" disabled={Boolean(busy)} onClick={() => setDefault(track)} title="设为默认字幕"><Check size={15} />{busy === `default-${track.id}` ? "设置中..." : "设为默认"}</button>}
+                <button type="button" className="danger" disabled={Boolean(busy)} onClick={() => remove(track)} title="删除字幕轨道"><Trash2 size={15} />{busy === `delete-${track.id}` ? "删除中..." : "删除"}</button>
+              </div>
+            </article>
+          ))}
+        </div>
+      ) : <p className="subtitle-track-empty">暂无字幕轨道，可以在下方上传第一条字幕。</p>}
+      <form className="subtitle-upload-form" onSubmit={submit}>
+        <label>语言代码<input value={language} onChange={(event) => setLanguage(event.target.value)} maxLength={24} placeholder="zh-CN" disabled={Boolean(busy)} required /></label>
+        <label>显示标签<input value={label} onChange={(event) => setLabel(event.target.value)} maxLength={40} placeholder="中文" disabled={Boolean(busy)} required /></label>
+        <label className="subtitle-file-field">字幕文件<input ref={inputRef} type="file" accept=".vtt,.srt,text/vtt,application/x-subrip" onChange={(event) => setFile(event.target.files?.[0] || null)} disabled={Boolean(busy)} required /></label>
+        <button className="secondary-button compact" disabled={!file || Boolean(busy)}><Upload size={15} />{busy === "upload" ? "上传中..." : "上传轨道"}</button>
+      </form>
+      {notice && <p className="subtitle-notice" role="status"><CircleCheck size={15} />{notice}</p>}
+      {error && <p className="inline-error">{error}</p>}
+    </section>
+  );
 }
 
 function AuthPage({ onAuth }: { onAuth: (payload: AuthPayload) => void }) {
@@ -1412,6 +1749,76 @@ function AuthPage({ onAuth }: { onAuth: (payload: AuthPayload) => void }) {
   );
 }
 
+function CreatorDashboard({ user }: { user: User }) {
+  const [stats, setStats] = useState<CreatorStats | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    api.creatorStats()
+      .then(setStats)
+      .catch((err) => setError(errorMessage(err)))
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading) return <LoadingBlock label="正在整理创作数据" />;
+  if (error) return <ErrorBlock message={error} />;
+  if (!stats) return null;
+
+  const performance = [
+    { label: "总播放", value: stats.views_count, icon: <Eye size={18} /> },
+    { label: "获赞", value: stats.likes_count, icon: <Heart size={18} /> },
+    { label: "收藏", value: stats.favorites_count, icon: <Bookmark size={18} /> },
+    { label: "评论", value: stats.comments_count, icon: <MessageCircle size={18} /> }
+  ];
+  const visibility = [
+    { label: visibilityLabels.public, value: stats.public_count, tone: "public" },
+    { label: visibilityLabels.unlisted, value: stats.unlisted_count, tone: "unlisted" },
+    { label: visibilityLabels.private, value: stats.private_count, tone: "private" }
+  ];
+
+  return (
+    <div className="page creator-dashboard-page">
+      <section className="page-heading heading-row">
+        <div><p className="eyebrow">创作者中心</p><h1>作品与观众概览</h1><p>集中查看投稿状态和累计互动，继续管理你的内容。</p></div>
+        <div className="dashboard-heading-actions"><Link to={`/users/${user.id}`} className="secondary-button"><UserRound size={17} />个人空间</Link><Link to="/me/videos" className="secondary-button"><Film size={17} />管理投稿</Link><Link to="/upload" className="primary-button"><Upload size={17} />发布视频</Link></div>
+      </section>
+
+      <section className="dashboard-performance" aria-label="创作表现">
+        <div className="dashboard-primary-stat"><span>全部投稿</span><strong>{formatCount(stats.videos_count)}</strong><small>{formatCount(stats.followers_count)} 位关注者</small></div>
+        {performance.map((item) => <div className="dashboard-stat" key={item.label}><span>{item.icon}{item.label}</span><strong>{formatCount(item.value)}</strong></div>)}
+      </section>
+
+      <div className="dashboard-columns">
+        <section className="dashboard-section" aria-labelledby="recent-videos-title">
+          <header><div><p className="eyebrow">最近投稿</p><h2 id="recent-videos-title">继续完善作品</h2></div><Link to="/me/videos">查看全部</Link></header>
+          {stats.recent_videos.length ? (
+            <div className="dashboard-video-list">
+              {stats.recent_videos.map((video) => (
+                <article className="dashboard-video-row" key={video.id}>
+                  <Link to={`/video/${video.id}`} className="dashboard-video-cover">
+                    {video.cover_url ? <img src={video.cover_url} alt="" /> : <div className="cover-fallback"><Play size={20} fill="currentColor" /></div>}
+                  </Link>
+                  <div className="dashboard-video-copy"><Link to={`/video/${video.id}`}>{video.title}</Link><span>{formatDate(video.created_at)} · {formatCount(video.views_count)} 播放</span></div>
+                  <div className="dashboard-video-status"><span className={`visibility-badge ${video.visibility}`}>{visibilityLabels[video.visibility]}</span><ProcessingBadge video={video} /></div>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <div className="dashboard-empty"><Film size={24} /><span>还没有投稿</span><Link to="/upload">发布第一条作品</Link></div>
+          )}
+        </section>
+
+        <section className="dashboard-section visibility-summary" aria-labelledby="visibility-title">
+          <header><div><p className="eyebrow">内容状态</p><h2 id="visibility-title">可见范围</h2></div></header>
+          <dl>{visibility.map((item) => <div key={item.tone}><dt><span className={`visibility-dot ${item.tone}`} />{item.label}</dt><dd>{formatCount(item.value)}</dd></div>)}</dl>
+          <p><Clock3 size={15} />{stats.processing_count > 0 ? `${stats.processing_count} 条投稿正在处理` : "当前没有正在处理的投稿"}</p>
+        </section>
+      </div>
+    </div>
+  );
+}
+
 function UploadPage() {
   const navigate = useNavigate();
   const videoRef = useRef<HTMLInputElement>(null);
@@ -1424,6 +1831,7 @@ function UploadPage() {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [category, setCategory] = useState("");
+  const [visibility, setVisibility] = useState<Video["visibility"]>("public");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -1436,7 +1844,7 @@ function UploadPage() {
     if (!videoFile) { setError("请选择视频文件"); return; }
     setBusy(true); setError("");
     const form = new FormData();
-    form.set("title", title); form.set("description", description); form.set("category", category); form.set("video", videoFile);
+    form.set("title", title); form.set("description", description); form.set("category", category); form.set("visibility", visibility); form.set("video", videoFile);
     if (coverFile) form.set("cover", coverFile);
     if (subtitleFile) { form.set("subtitle", subtitleFile); form.set("subtitle_language", "zh-CN"); form.set("subtitle_label", "中文"); }
     try { const created = await api.upload(form); navigate(`/video/${created.id}`); }
@@ -1464,6 +1872,7 @@ function UploadPage() {
         <div className="stack-form upload-fields">
           <label>标题<input value={title} onChange={(event) => setTitle(event.target.value)} minLength={2} maxLength={80} placeholder="准确说明视频内容" required /><span className="field-count">{title.length}/80</span></label>
           <label>分区<select value={category} onChange={(event) => setCategory(event.target.value)} required>{categories.map((item) => <option key={item}>{item}</option>)}</select></label>
+          <label>可见范围<select value={visibility} onChange={(event) => setVisibility(event.target.value as Video["visibility"])}>{Object.entries(visibilityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select><span className="field-help">{visibilityHelp[visibility]}</span></label>
           <label>简介<textarea value={description} onChange={(event) => setDescription(event.target.value)} maxLength={2000} rows={8} placeholder="补充创作背景、内容提要或相关链接" /><span className="field-count">{description.length}/2000</span></label>
           {error && <p className="inline-error">{error}</p>}
           <button className="primary-button wide" disabled={busy || !videoFile}>{busy ? "正在处理视频..." : "发布作品"}</button>
@@ -1483,22 +1892,43 @@ function MyVideosPage() {
   const [editing, setEditing] = useState<Video | null>(null);
   const [deleting, setDeleting] = useState<Video | null>(null);
   const [busy, setBusy] = useState("");
+  const listRequestRef = useRef<AbortController | null>(null);
+  const dialogTriggerRef = useRef<HTMLElement | null>(null);
+  const pageHeadingRef = useRef<HTMLHeadingElement>(null);
   const page = pageFrom(searchParams);
   const videos = result.items;
 
-  const requestPage = (pageNumber = page) => api.myVideos(new URLSearchParams({ page: String(pageNumber), page_size: "12" }));
+  const requestPage = (pageNumber: number, signal?: AbortSignal) => api.myVideos(new URLSearchParams({ page: String(pageNumber), page_size: "12" }), signal);
+  const refreshPage = async (pageNumber: number) => {
+    listRequestRef.current?.abort();
+    const controller = new AbortController();
+    listRequestRef.current = controller;
+    try {
+      const next = await requestPage(pageNumber, controller.signal);
+      if (listRequestRef.current !== controller || controller.signal.aborted) return false;
+      setResult(next);
+      return true;
+    } finally {
+      if (listRequestRef.current === controller) listRequestRef.current = null;
+    }
+  };
+  const closeDialog = (setter: (value: null) => void) => {
+    setter(null);
+    window.setTimeout(() => dialogTriggerRef.current?.focus(), 0);
+  };
 
   useEffect(() => { api.categories().then(setCategories).catch(console.error); }, []);
   useEffect(() => {
     setLoading(true);
     setError("");
-    requestPage().then(setResult).catch((err) => setError(errorMessage(err))).finally(() => setLoading(false));
+    refreshPage(page).catch((err) => { if (!(err instanceof DOMException && err.name === "AbortError")) setError(errorMessage(err)); }).finally(() => setLoading(false));
+    return () => listRequestRef.current?.abort();
   }, [page]);
 
   const processingKey = videos.filter((video) => video.processing_status === "pending" || video.processing_status === "processing").map((video) => video.id).join(",");
   useEffect(() => {
     if (!processingKey) return;
-    const timer = window.setInterval(() => requestPage().then(setResult).catch(console.error), 2500);
+    const timer = window.setInterval(() => refreshPage(page).catch((err) => { if (!(err instanceof DOMException && err.name === "AbortError")) console.error(err); }), 2500);
     return () => window.clearInterval(timer);
   }, [page, processingKey]);
 
@@ -1528,8 +1958,9 @@ function MyVideosPage() {
       if (videos.length === 1 && page > 1) {
         setPage(page - 1);
       } else {
-        setResult(await requestPage());
+        await refreshPage(page);
       }
+      window.setTimeout(() => pageHeadingRef.current?.focus(), 0);
       showNotice("投稿及其媒体文件已删除");
     } catch (err) { setError(errorMessage(err)); } finally { setBusy(""); }
   };
@@ -1541,7 +1972,7 @@ function MyVideosPage() {
 
   return (
     <div className="page management-page">
-      <section className="page-heading heading-row"><div><p className="eyebrow">个人空间</p><h1>我的投稿</h1><p>查看作品表现，继续完善你的创作列表。</p></div><Link to="/upload" className="primary-button"><Upload size={17} />发布视频</Link></section>
+      <section className="page-heading heading-row"><div><p className="eyebrow">个人空间</p><h1 ref={pageHeadingRef} tabIndex={-1}>我的投稿</h1><p>查看作品表现，继续完善你的创作列表。</p></div><Link to="/upload" className="primary-button"><Upload size={17} />发布视频</Link></section>
       <div className="management-summary"><span><strong>{result.total}</strong> 条投稿</span><span>每页 12 条</span></div>
       {notice && <div className="management-notice" role="status"><CircleCheck size={17} />{notice}</div>}
       {error && <p className="inline-error management-error">{error}</p>}
@@ -1557,14 +1988,15 @@ function MyVideosPage() {
                 <div className="management-copy">
                   <div className="management-title-line"><Link to={`/video/${video.id}`}>{video.title}</Link><ProcessingBadge video={video} /></div>
                   <p>{video.description || "暂未填写视频简介"}</p>
-                  <div className="management-meta"><span>{video.category}</span><span>{formatDate(video.created_at)}</span><span>{formatFileSize(video.size_bytes)}</span></div>
+                  <div className="management-meta"><span>{video.category}</span><span className={`visibility-badge ${video.visibility}`}>{visibilityLabels[video.visibility]}</span><span>{formatDate(video.created_at)}</span><span>{formatFileSize(video.size_bytes)}</span></div>
+                  {(video.processing_status === "pending" || video.processing_status === "processing") && <ProcessingProgress video={video} compact />}
                   {video.processing_status === "failed" && <span className="management-processing-error">{video.processing_error || "媒体处理失败，可以手动重新转码"}</span>}
                   <div className="management-stats"><span><Eye size={14} />{formatCount(video.views_count)} 播放</span><span><Heart size={14} />{formatCount(video.likes_count)}</span><span><MessageCircle size={14} />{formatCount(video.comments_count)}</span></div>
                 </div>
                 <div className="management-actions" aria-label={`${video.title}的管理操作`}>
-                  <button type="button" onClick={() => setEditing(video)} title="编辑投稿"><Pencil size={16} />编辑</button>
+                  <button type="button" onClick={(event) => { dialogTriggerRef.current = event.currentTarget; setEditing(video); }} title="编辑投稿"><Pencil size={16} />编辑</button>
                   {video.processing_status === "failed" && <button type="button" disabled={busy === `retry-${video.id}`} onClick={() => retry(video)} title="重新转码"><RefreshCw size={16} className={busy === `retry-${video.id}` ? "spin-icon" : ""} />重试</button>}
-                  <button type="button" className="danger" disabled={video.processing_status === "processing" || busy === `delete-${video.id}`} onClick={() => setDeleting(video)} title={video.processing_status === "processing" ? "转码完成后才能删除" : "删除投稿"}><Trash2 size={16} />删除</button>
+                  <button type="button" className="danger" disabled={video.processing_status === "processing" || busy === `delete-${video.id}`} onClick={(event) => { dialogTriggerRef.current = event.currentTarget; setDeleting(video); }} title={video.processing_status === "processing" ? "转码完成后才能删除" : "删除投稿"}><Trash2 size={16} />删除</button>
                 </div>
               </article>
             ))}
@@ -1572,8 +2004,8 @@ function MyVideosPage() {
           <Pagination page={result.page} pageSize={result.page_size} total={result.total} hasNext={result.has_next} onPageChange={setPage} />
         </>
       ) : <EmptyState icon={<History size={28} />} title="还没有投稿" text="第一条作品不必完美，先让它可以被看见。" action={<Link to="/upload" className="primary-button"><Upload size={17} />开始投稿</Link>} />}
-      {editing && <EditVideoDialog video={editing} categories={categories} onClose={() => setEditing(null)} onSaved={applyUpdated} />}
-      {deleting && <DeleteVideoDialog video={deleting} busy={busy === `delete-${deleting.id}`} onClose={() => setDeleting(null)} onConfirm={() => remove(deleting)} />}
+      {editing && <EditVideoDialog video={editing} categories={categories} onClose={() => closeDialog(setEditing)} onSaved={(updated) => { applyUpdated(updated); window.setTimeout(() => dialogTriggerRef.current?.focus(), 0); }} />}
+      {deleting && <DeleteVideoDialog video={deleting} busy={busy === `delete-${deleting.id}`} onClose={() => closeDialog(setDeleting)} onConfirm={() => remove(deleting)} />}
     </div>
   );
 }
@@ -1583,28 +2015,26 @@ function EditVideoDialog({ video, categories, onClose, onSaved }: { video: Video
   const [title, setTitle] = useState(video.title);
   const [description, setDescription] = useState(video.description);
   const [category, setCategory] = useState(video.category);
+  const [visibility, setVisibility] = useState<Video["visibility"]>(video.visibility);
   const [cover, setCover] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const panelRef = useRef<HTMLElement>(null);
   const coverPreview = useMemo(() => cover ? URL.createObjectURL(cover) : video.cover_url, [cover, video.cover_url]);
   useEffect(() => () => { if (cover) URL.revokeObjectURL(coverPreview); }, [cover, coverPreview]);
-  useEffect(() => {
-    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape" && !busy) onClose(); };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [busy, onClose]);
+  useDialogFocus(panelRef, busy, onClose);
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     setBusy(true); setError("");
     const form = new FormData();
-    form.set("title", title); form.set("description", description); form.set("category", category);
+    form.set("title", title); form.set("description", description); form.set("category", category); form.set("visibility", visibility);
     if (cover) form.set("cover", cover);
     try { onSaved(await api.updateVideo(video.id, form)); }
     catch (err) { setError(errorMessage(err)); } finally { setBusy(false); }
   };
   return (
     <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onClose(); }}>
-      <section className="dialog-panel edit-video-dialog" role="dialog" aria-modal="true" aria-labelledby="edit-video-title">
+      <section ref={panelRef} className="dialog-panel edit-video-dialog" role="dialog" aria-modal="true" aria-labelledby="edit-video-title">
         <header><div><p className="eyebrow">投稿管理</p><h2 id="edit-video-title">编辑视频信息</h2></div><button type="button" className="icon-button" onClick={onClose} disabled={busy} aria-label="关闭编辑窗口" title="关闭"><X size={19} /></button></header>
         <form className="edit-video-form" onSubmit={submit}>
           <button type="button" className="edit-cover" onClick={() => coverRef.current?.click()}>
@@ -1615,6 +2045,7 @@ function EditVideoDialog({ video, categories, onClose, onSaved }: { video: Video
           <div className="stack-form edit-video-fields">
             <label>标题<input value={title} onChange={(event) => setTitle(event.target.value)} minLength={2} maxLength={80} required /><span className="field-count">{title.length}/80</span></label>
             <label>分区<select value={category} onChange={(event) => setCategory(event.target.value)} required>{(categories.length ? categories : [video.category]).map((item) => <option key={item}>{item}</option>)}</select></label>
+            <label>可见范围<select value={visibility} onChange={(event) => setVisibility(event.target.value as Video["visibility"])}>{Object.entries(visibilityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select><span className="field-help">{visibilityHelp[visibility]}</span></label>
             <label>简介<textarea value={description} onChange={(event) => setDescription(event.target.value)} maxLength={2000} rows={6} placeholder="补充视频内容和创作背景" /><span className="field-count">{description.length}/2000</span></label>
             {error && <p className="inline-error">{error}</p>}
             <div className="dialog-actions"><button type="button" className="secondary-button" onClick={onClose} disabled={busy}>取消</button><button className="primary-button" disabled={busy}>{busy ? "保存中..." : "保存修改"}</button></div>
@@ -1626,9 +2057,11 @@ function EditVideoDialog({ video, categories, onClose, onSaved }: { video: Video
 }
 
 function DeleteVideoDialog({ video, busy, onClose, onConfirm }: { video: Video; busy: boolean; onClose: () => void; onConfirm: () => void }) {
+  const panelRef = useRef<HTMLElement>(null);
+  useDialogFocus(panelRef, busy, onClose);
   return (
     <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onClose(); }}>
-      <section className="dialog-panel delete-video-dialog" role="alertdialog" aria-modal="true" aria-labelledby="delete-video-title" aria-describedby="delete-video-description">
+      <section ref={panelRef} className="dialog-panel delete-video-dialog" role="alertdialog" aria-modal="true" aria-labelledby="delete-video-title" aria-describedby="delete-video-description">
         <span className="danger-icon"><Trash2 size={22} /></span>
         <h2 id="delete-video-title">删除这条投稿？</h2>
         <p id="delete-video-description">“{video.title}”的数据库记录、原视频、封面、字幕和转码文件都会被永久删除，此操作无法撤销。</p>

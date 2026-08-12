@@ -3,6 +3,8 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"mime/multipart"
@@ -21,18 +23,18 @@ import (
 	"gvideo/backend/internal/repository"
 )
 
-func subtitleHeader(t *testing.T, name, content string) *multipart.FileHeader {
+func multipartFileHeader(t *testing.T, field, name, contentType string, content []byte) *multipart.FileHeader {
 	t.Helper()
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 	header := make(textproto.MIMEHeader)
-	header.Set("Content-Disposition", `form-data; name="subtitle"; filename="`+name+`"`)
-	header.Set("Content-Type", "text/plain")
+	header.Set("Content-Disposition", `form-data; name="`+field+`"; filename="`+name+`"`)
+	header.Set("Content-Type", contentType)
 	part, err := writer.CreatePart(header)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := part.Write([]byte(content)); err != nil {
+	if _, err := part.Write(content); err != nil {
 		t.Fatal(err)
 	}
 	if err := writer.Close(); err != nil {
@@ -40,14 +42,19 @@ func subtitleHeader(t *testing.T, name, content string) *multipart.FileHeader {
 	}
 	request := httptest.NewRequest("POST", "/", &body)
 	request.Header.Set("Content-Type", writer.FormDataContentType())
-	if err := request.ParseMultipartForm(2 << 20); err != nil {
+	if err := request.ParseMultipartForm(12 << 20); err != nil {
 		t.Fatal(err)
 	}
-	_, file, err := request.FormFile("subtitle")
+	_, file, err := request.FormFile(field)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return file
+}
+
+func subtitleHeader(t *testing.T, name, content string) *multipart.FileHeader {
+	t.Helper()
+	return multipartFileHeader(t, "subtitle", name, "text/plain", []byte(content))
 }
 
 func TestRegisterLoginAndSession(t *testing.T) {
@@ -118,6 +125,147 @@ func TestCreatorProfileAndFollowRules(t *testing.T) {
 	}
 }
 
+func TestUpdateProfileValidationAndAvatarLifecycle(t *testing.T) {
+	dir := t.TempDir()
+	mediaDir := filepath.Join(dir, "media")
+	db, err := platform.OpenDatabase(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	repo := repository.New(db)
+	ctx := context.Background()
+	user, err := repo.CreateUser(ctx, "profile_user", "hash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := repo.CreateUser(ctx, "profile_other", "hash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldRelative := filepath.Join("avatars", "old.png")
+	if _, err := repo.UpdateProfile(ctx, user.ID, user.Username, "old bio", &oldRelative); err != nil {
+		t.Fatal(err)
+	}
+	oldAbsolute := filepath.Join(mediaDir, oldRelative)
+	if err := os.MkdirAll(filepath.Dir(oldAbsolute), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(oldAbsolute, []byte("old avatar"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	svc := New(repo, config.Config{MediaDir: mediaDir}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	for name, input := range map[string]UpdateProfileInput{
+		"invalid user":     {UserID: 0, Username: "valid_name"},
+		"invalid username": {UserID: user.ID, Username: "x"},
+		"bio too long":     {UserID: user.ID, Username: "valid_name", Bio: strings.Repeat("界", 301)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := svc.UpdateProfile(ctx, input); !errors.Is(err, domain.ErrInvalidInput) {
+				t.Fatalf("error = %v, want invalid input", err)
+			}
+		})
+	}
+	if _, err := svc.UpdateProfile(ctx, UpdateProfileInput{
+		UserID: user.ID, Username: "valid_name",
+		Avatar: multipartFileHeader(t, "avatar", "avatar.txt", "text/plain", []byte("not an image")),
+	}); !errors.Is(err, domain.ErrInvalidInput) {
+		t.Fatalf("invalid avatar error = %v, want invalid input", err)
+	}
+
+	updated, err := svc.UpdateProfile(ctx, UpdateProfileInput{
+		UserID: user.ID, Username: "profile_renamed", Bio: "new bio",
+		Avatar: multipartFileHeader(t, "avatar", "avatar.png", "image/png", []byte("\x89PNG\r\n\x1a\navatar")),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Username != "profile_renamed" || updated.Bio != "new bio" || !strings.HasPrefix(updated.AvatarURL, "/media/avatars/") {
+		t.Fatalf("unexpected updated profile: %#v", updated)
+	}
+	if _, err := os.Stat(oldAbsolute); !os.IsNotExist(err) {
+		t.Fatalf("old avatar should be removed, stat err=%v", err)
+	}
+	newAvatar := filepath.Join(mediaDir, filepath.FromSlash(strings.TrimPrefix(updated.AvatarURL, "/media/")))
+	if _, err := os.Stat(newAvatar); err != nil {
+		t.Fatalf("new avatar should exist: %v", err)
+	}
+
+	if _, err := svc.UpdateProfile(ctx, UpdateProfileInput{
+		UserID: user.ID, Username: other.Username, Bio: "conflict",
+		Avatar: multipartFileHeader(t, "avatar", "replacement.png", "image/png", []byte("\x89PNG\r\n\x1a\nreplacement")),
+	}); !errors.Is(err, domain.ErrConflict) {
+		t.Fatalf("conflicting update error = %v, want conflict", err)
+	}
+	entries, err := os.ReadDir(filepath.Join(mediaDir, "avatars"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != filepath.Base(newAvatar) {
+		t.Fatalf("failed profile update left avatar files: %#v", entries)
+	}
+}
+
+func TestPrivateVideoCommentsAndMediaAuthorization(t *testing.T) {
+	dir := t.TempDir()
+	db, err := platform.OpenDatabase(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	repo := repository.New(db)
+	ctx := context.Background()
+	owner, err := repo.CreateUser(ctx, "private_owner", "hash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	viewer, err := repo.CreateUser(ctx, "private_viewer", "hash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	privateVideo, err := repo.CreateVideoWithSubtitle(ctx, domain.NewVideo{
+		UserID: owner.ID, Title: "Private video", Category: "knowledge", Visibility: "private",
+		VideoPath: "videos/private.mp4", CoverPath: "covers/private.jpg", MimeType: "video/mp4", SizeBytes: 100,
+	}, domain.NewSubtitle{Language: "en", Label: "English", Path: "subtitles/private/en.vtt", IsDefault: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE videos SET hls_master_path = 'hls/private/master.m3u8' WHERE id = ?`, privateVideo.ID); err != nil {
+		t.Fatal(err)
+	}
+	svc := New(repo, config.Config{MediaDir: filepath.Join(dir, "media")}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	if _, err := svc.Comments(ctx, privateVideo.ID, 0); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("anonymous private comments error = %v, want not found", err)
+	}
+	if _, err := svc.CreateComment(ctx, viewer.ID, privateVideo.ID, "no access"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("viewer private comment error = %v, want not found", err)
+	}
+	comment, err := svc.CreateComment(ctx, owner.ID, privateVideo.ID, "owner comment")
+	if err != nil || comment.UserID != owner.ID {
+		t.Fatalf("owner private comment = %#v err=%v", comment, err)
+	}
+	comments, err := svc.Comments(ctx, privateVideo.ID, owner.ID)
+	if err != nil || len(comments) != 1 {
+		t.Fatalf("owner private comments = %#v err=%v", comments, err)
+	}
+
+	for _, mediaPath := range []string{
+		"videos/private.mp4", "covers/private.jpg", "subtitles/private/en.vtt", "hls/private/segment-001.ts",
+	} {
+		if err := svc.AuthorizeMedia(ctx, mediaPath, viewer.ID); !errors.Is(err, domain.ErrNotFound) {
+			t.Fatalf("viewer media %q error = %v, want not found", mediaPath, err)
+		}
+		if err := svc.AuthorizeMedia(ctx, mediaPath, owner.ID); err != nil {
+			t.Fatalf("owner media %q: %v", mediaPath, err)
+		}
+	}
+	if err := svc.AuthorizeMedia(ctx, "avatars/public.png", 0); err != nil {
+		t.Fatalf("avatar should be public: %v", err)
+	}
+}
+
 func TestInspectAndConvertSubtitleSRT(t *testing.T) {
 	track, err := inspectAndConvertSubtitle(subtitleHeader(t, "captions.srt", "1\n00:00:01,000 --> 00:00:03,500\nHello\n"), "en", "English")
 	if err != nil {
@@ -165,6 +313,104 @@ func TestAddSubtitleRequiresVideoAuthor(t *testing.T) {
 	_, err = svc.AddSubtitle(ctx, viewer.ID, video.ID, subtitleHeader(t, "captions.vtt", "WEBVTT\n\n00:00:00.000 --> 00:00:01.000\nNo access\n"), "en", "English")
 	if err != domain.ErrForbidden {
 		t.Fatalf("expected forbidden, got %v", err)
+	}
+}
+
+func TestSubtitleManagementAndFileCleanup(t *testing.T) {
+	dir := t.TempDir()
+	mediaDir := filepath.Join(dir, "media")
+	db, err := platform.OpenDatabase(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	repo := repository.New(db)
+	ctx := context.Background()
+	author, err := repo.CreateUser(ctx, "subtitle_manager", "hash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := repo.CreateUser(ctx, "subtitle_outsider", "hash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	video, err := repo.CreateVideoWithSubtitle(ctx, domain.NewVideo{
+		UserID: author.ID, Title: "Subtitle management", Category: "knowledge",
+		VideoPath: "videos/subtitle-management.mp4", MimeType: "video/mp4", SizeBytes: 100,
+	}, domain.NewSubtitle{
+		Language: "zh-CN", Label: "Chinese", Path: "subtitles/first/zh-CN.vtt", IsDefault: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := repo.CreateSubtitle(ctx, video.ID, "en", "English", "subtitles/second/en.vtt", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for path, content := range map[string]string{
+		"subtitles/first/zh-CN.vtt": "WEBVTT\n",
+		"subtitles/second/en.vtt":   "WEBVTT\n",
+	} {
+		absolute := filepath.Join(mediaDir, filepath.FromSlash(path))
+		if err := os.MkdirAll(filepath.Dir(absolute), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(absolute, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	svc := New(repo, config.Config{MediaDir: mediaDir}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	if _, err := svc.SetDefaultSubtitle(ctx, other.ID, video.ID, second.ID); !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("non-author set default error=%v", err)
+	}
+	if _, err := svc.DeleteSubtitle(ctx, other.ID, video.ID, second.ID); !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("non-author delete error=%v", err)
+	}
+	if _, err := svc.SetDefaultSubtitle(ctx, author.ID, video.ID, 99999); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("missing subtitle error=%v", err)
+	}
+	tracks, err := svc.SetDefaultSubtitle(ctx, author.ID, video.ID, second.ID)
+	if err != nil || len(tracks) != 2 || tracks[0].ID != second.ID || !tracks[0].IsDefault {
+		t.Fatalf("set default tracks=%#v err=%v", tracks, err)
+	}
+	tracks, err = svc.DeleteSubtitle(ctx, author.ID, video.ID, second.ID)
+	if err != nil || len(tracks) != 1 || !tracks[0].IsDefault || tracks[0].Language != "zh-CN" {
+		t.Fatalf("delete default tracks=%#v err=%v", tracks, err)
+	}
+	if _, err := os.Stat(filepath.Join(mediaDir, "subtitles", "second", "en.vtt")); !os.IsNotExist(err) {
+		t.Fatalf("deleted subtitle file still exists: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(mediaDir, "subtitles", "second")); !os.IsNotExist(err) {
+		t.Fatalf("empty subtitle directory still exists: %v", err)
+	}
+	tracks, err = svc.DeleteSubtitle(ctx, author.ID, video.ID, tracks[0].ID)
+	if err != nil || len(tracks) != 0 {
+		t.Fatalf("delete last subtitle tracks=%#v err=%v", tracks, err)
+	}
+	if _, err := os.Stat(filepath.Join(mediaDir, "subtitles", "first")); !os.IsNotExist(err) {
+		t.Fatalf("last subtitle directory still exists: %v", err)
+	}
+}
+
+func TestPublicVideoSanitizesProcessingFailure(t *testing.T) {
+	video := publicVideo(domain.Video{
+		ProcessingStatus: "failed",
+		ProcessingError:  `C:\Users\private\video.mp4: ffmpeg invalid data found when processing input`,
+	})
+	if video.ProcessingMessage == "" || strings.Contains(video.ProcessingMessage, `C:\`) || strings.Contains(strings.ToLower(video.ProcessingMessage), "ffmpeg") {
+		t.Fatalf("unsafe processing message: %q", video.ProcessingMessage)
+	}
+	payload, err := json.Marshal(video)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(payload), `C:\\Users`) || strings.Contains(strings.ToLower(string(payload)), "ffmpeg") {
+		t.Fatalf("serialized video exposed internal error: %s", payload)
+	}
+	timeout := publicVideo(domain.Video{ProcessingStatus: "failed", ProcessingError: "transcode timeout"})
+	if !strings.Contains(timeout.ProcessingMessage, "超时") {
+		t.Fatalf("timeout message is not actionable: %q", timeout.ProcessingMessage)
 	}
 }
 
@@ -216,6 +462,11 @@ func TestVideoManagementLifecycle(t *testing.T) {
 
 	if _, err := svc.UpdateVideo(ctx, UpdateVideoInput{UserID: other.ID, VideoID: video.ID, Title: "No access", Category: "知识"}); err != domain.ErrForbidden {
 		t.Fatalf("expected forbidden update, got %v", err)
+	}
+	if _, err := svc.UpdateVideo(ctx, UpdateVideoInput{
+		UserID: author.ID, VideoID: video.ID, Title: "Invalid visibility", Category: "知识", Visibility: "friends",
+	}); err != domain.ErrInvalidInput {
+		t.Fatalf("expected invalid visibility error, got %v", err)
 	}
 	updated, err := svc.UpdateVideo(ctx, UpdateVideoInput{UserID: author.ID, VideoID: video.ID, Title: "Updated title", Description: "Updated description", Category: "科技"})
 	if err != nil || updated.Title != "Updated title" || updated.Description != "Updated description" {

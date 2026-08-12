@@ -2,6 +2,7 @@ export interface User {
   id: number;
   username: string;
   bio: string;
+  avatar_url: string;
   created_at: string;
 }
 
@@ -24,9 +25,11 @@ export interface Video {
   id: number;
   user_id: number;
   username: string;
+  avatar_url: string;
   title: string;
   description: string;
   category: string;
+  visibility: "public" | "unlisted" | "private";
   video_url: string;
   hls_url: string;
   cover_url: string;
@@ -34,6 +37,8 @@ export interface Video {
   duration_seconds: number;
   size_bytes: number;
   processing_status: "pending" | "processing" | "ready" | "failed";
+  processing_progress: number;
+  processing_stage: string;
   source_width: number;
   source_height: number;
   source_bitrate: number;
@@ -64,8 +69,23 @@ export interface Comment {
   video_id: number;
   user_id: number;
   username: string;
+  avatar_url: string;
   content: string;
   created_at: string;
+}
+
+export interface CreatorStats {
+  videos_count: number;
+  followers_count: number;
+  views_count: number;
+  likes_count: number;
+  favorites_count: number;
+  comments_count: number;
+  public_count: number;
+  unlisted_count: number;
+  private_count: number;
+  processing_count: number;
+  recent_videos: Video[];
 }
 
 export interface AuthPayload {

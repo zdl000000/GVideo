@@ -1,0 +1,44 @@
+server {
+    listen 80;
+    server_name _;
+
+    location = /gateway-healthz {
+        access_log off;
+        default_type text/plain;
+        return 200 "ok\n";
+    }
+
+    location / {
+        return 308 https://$host${HTTPS_REDIRECT_PORT_SUFFIX}$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl;
+    server_name _;
+    client_max_body_size 524m;
+
+    ssl_certificate /etc/nginx/tls/fullchain.pem;
+    ssl_certificate_key /etc/nginx/tls/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_session_cache shared:GVIDEO_TLS:10m;
+    ssl_session_timeout 1d;
+    ssl_session_tickets off;
+
+    location = /gateway-healthz {
+        access_log off;
+        default_type text/plain;
+        return 200 "ok\n";
+    }
+
+    location / {
+        proxy_pass http://frontend:80;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 900s;
+        proxy_send_timeout 900s;
+    }
+}

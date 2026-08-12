@@ -21,6 +21,7 @@ type User struct {
 	ID        int64     `json:"id"`
 	Username  string    `json:"username"`
 	Bio       string    `json:"bio"`
+	AvatarURL string    `json:"avatar_url"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
@@ -28,6 +29,7 @@ type CreatorProfile struct {
 	ID             int64     `json:"id"`
 	Username       string    `json:"username"`
 	Bio            string    `json:"bio"`
+	AvatarURL      string    `json:"avatar_url"`
 	FollowersCount int64     `json:"followers_count"`
 	FollowingCount int64     `json:"following_count"`
 	VideosCount    int64     `json:"videos_count"`
@@ -42,35 +44,39 @@ type Session struct {
 }
 
 type Video struct {
-	ID                int64           `json:"id"`
-	UserID            int64           `json:"user_id"`
-	Username          string          `json:"username"`
-	Title             string          `json:"title"`
-	Description       string          `json:"description"`
-	Category          string          `json:"category"`
-	VideoURL          string          `json:"video_url"`
-	HLSURL            string          `json:"hls_url"`
-	CoverURL          string          `json:"cover_url"`
-	MimeType          string          `json:"mime_type"`
-	DurationSeconds   float64         `json:"duration_seconds"`
-	SizeBytes         int64           `json:"size_bytes"`
-	ProcessingStatus  string          `json:"processing_status"`
-	SourceWidth       int             `json:"source_width"`
-	SourceHeight      int             `json:"source_height"`
-	SourceBitrate     int64           `json:"source_bitrate"`
-	VideoCodec        string          `json:"video_codec"`
-	AudioCodec        string          `json:"audio_codec"`
-	ProcessingError   string          `json:"-"`
-	ProcessingMessage string          `json:"processing_error,omitempty"`
-	ProcessedAt       *time.Time      `json:"processed_at,omitempty"`
-	ViewsCount        int64           `json:"views_count"`
-	LikesCount        int64           `json:"likes_count"`
-	FavoritesCount    int64           `json:"favorites_count"`
-	CommentsCount     int64           `json:"comments_count"`
-	Liked             bool            `json:"liked"`
-	Favorited         bool            `json:"favorited"`
-	SubtitleTracks    []SubtitleTrack `json:"subtitle_tracks"`
-	CreatedAt         time.Time       `json:"created_at"`
+	ID                 int64           `json:"id"`
+	UserID             int64           `json:"user_id"`
+	Username           string          `json:"username"`
+	AvatarURL          string          `json:"avatar_url"`
+	Title              string          `json:"title"`
+	Description        string          `json:"description"`
+	Category           string          `json:"category"`
+	Visibility         string          `json:"visibility"`
+	VideoURL           string          `json:"video_url"`
+	HLSURL             string          `json:"hls_url"`
+	CoverURL           string          `json:"cover_url"`
+	MimeType           string          `json:"mime_type"`
+	DurationSeconds    float64         `json:"duration_seconds"`
+	SizeBytes          int64           `json:"size_bytes"`
+	ProcessingStatus   string          `json:"processing_status"`
+	ProcessingProgress int             `json:"processing_progress"`
+	ProcessingStage    string          `json:"processing_stage"`
+	SourceWidth        int             `json:"source_width"`
+	SourceHeight       int             `json:"source_height"`
+	SourceBitrate      int64           `json:"source_bitrate"`
+	VideoCodec         string          `json:"video_codec"`
+	AudioCodec         string          `json:"audio_codec"`
+	ProcessingError    string          `json:"-"`
+	ProcessingMessage  string          `json:"processing_error,omitempty"`
+	ProcessedAt        *time.Time      `json:"processed_at,omitempty"`
+	ViewsCount         int64           `json:"views_count"`
+	LikesCount         int64           `json:"likes_count"`
+	FavoritesCount     int64           `json:"favorites_count"`
+	CommentsCount      int64           `json:"comments_count"`
+	Liked              bool            `json:"liked"`
+	Favorited          bool            `json:"favorited"`
+	SubtitleTracks     []SubtitleTrack `json:"subtitle_tracks"`
+	CreatedAt          time.Time       `json:"created_at"`
 }
 
 type SubtitleTrack struct {
@@ -108,18 +114,20 @@ type Comment struct {
 	VideoID   int64     `json:"video_id"`
 	UserID    int64     `json:"user_id"`
 	Username  string    `json:"username"`
+	AvatarURL string    `json:"avatar_url"`
 	Content   string    `json:"content"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
 type VideoFilter struct {
-	Query           string
-	Category        string
-	Sort            string
-	UserID          int64
-	FollowingUserID int64
-	Limit           int
-	Offset          int
+	Query            string
+	Category         string
+	Sort             string
+	UserID           int64
+	FollowingUserID  int64
+	IncludeNonPublic bool
+	Limit            int
+	Offset           int
 }
 
 type VideoPage struct {
@@ -134,6 +142,7 @@ type UpdateVideo struct {
 	Title       string
 	Description string
 	Category    string
+	Visibility  string
 	CoverPath   *string
 }
 
@@ -149,11 +158,32 @@ type NewVideo struct {
 	Title           string
 	Description     string
 	Category        string
+	Visibility      string
 	VideoPath       string
 	CoverPath       string
 	MimeType        string
 	DurationSeconds float64
 	SizeBytes       int64
+}
+
+type CreatorStats struct {
+	VideosCount     int64   `json:"videos_count"`
+	FollowersCount  int64   `json:"followers_count"`
+	ViewsCount      int64   `json:"views_count"`
+	LikesCount      int64   `json:"likes_count"`
+	FavoritesCount  int64   `json:"favorites_count"`
+	CommentsCount   int64   `json:"comments_count"`
+	PublicCount     int64   `json:"public_count"`
+	UnlistedCount   int64   `json:"unlisted_count"`
+	PrivateCount    int64   `json:"private_count"`
+	ProcessingCount int64   `json:"processing_count"`
+	RecentVideos    []Video `json:"recent_videos"`
+}
+
+type MediaAccess struct {
+	VideoID    int64
+	UserID     int64
+	Visibility string
 }
 
 type NewSubtitle struct {

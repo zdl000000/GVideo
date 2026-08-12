@@ -10,6 +10,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -98,9 +99,11 @@ func TestCoreVideoFlow(t *testing.T) {
 	var uploaded testEnvelope
 	decodeResponse(t, uploadResult, &uploaded)
 	var video struct {
-		ID             int64  `json:"id"`
-		VideoURL       string `json:"video_url"`
-		SubtitleTracks []struct {
+		ID                 int64  `json:"id"`
+		VideoURL           string `json:"video_url"`
+		ProcessingProgress int    `json:"processing_progress"`
+		ProcessingStage    string `json:"processing_stage"`
+		SubtitleTracks     []struct {
 			Language  string `json:"language"`
 			Label     string `json:"label"`
 			URL       string `json:"url"`
@@ -109,6 +112,9 @@ func TestCoreVideoFlow(t *testing.T) {
 	}
 	if err := json.Unmarshal(uploaded.Data, &video); err != nil || video.ID == 0 || video.VideoURL == "" {
 		t.Fatalf("read uploaded video: %v data=%s", err, uploaded.Data)
+	}
+	if video.ProcessingProgress != 0 || video.ProcessingStage != "queued" {
+		t.Fatalf("unexpected upload processing state: %d/%q", video.ProcessingProgress, video.ProcessingStage)
 	}
 	if len(video.SubtitleTracks) != 1 || video.SubtitleTracks[0].Language != "zh-CN" || !video.SubtitleTracks[0].IsDefault {
 		t.Fatalf("unexpected subtitle tracks: %#v", video.SubtitleTracks)
@@ -409,6 +415,371 @@ func TestCreatorSpaceAndFollowingHTTPFlow(t *testing.T) {
 	}
 }
 
+func TestSubtitleManagementHTTPAuthorizationAndResponses(t *testing.T) {
+	dir := t.TempDir()
+	db, err := platform.OpenDatabase(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	cfg := config.Config{MediaDir: filepath.Join(dir, "media"), SessionTTL: time.Hour}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	repo := repository.New(db)
+	handler := New(service.New(repo, cfg, logger), cfg, logger).Routes()
+	owner := registerTestUser(t, handler, "subtitle_http_owner")
+	other := registerTestUser(t, handler, "subtitle_http_other")
+	ctx := context.Background()
+	video, err := repo.CreateVideoWithSubtitle(ctx, domain.NewVideo{
+		UserID: owner.User.ID, Title: "Subtitle HTTP", Category: "knowledge",
+		VideoPath: "videos/subtitle-http.mp4", MimeType: "video/mp4", SizeBytes: 100,
+	}, domain.NewSubtitle{
+		Language: "zh-CN", Label: "Chinese", Path: "subtitles/http-first/zh-CN.vtt", IsDefault: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := repo.CreateSubtitle(ctx, video.ID, "en", "English", "subtitles/http-second/en.vtt", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstID := video.SubtitleTracks[0].ID
+	defaultPath := fmt.Sprintf("/api/v1/videos/%d/subtitles/%d/default", video.ID, second.ID)
+	deletePath := fmt.Sprintf("/api/v1/videos/%d/subtitles/%d", video.ID, second.ID)
+
+	anonymous := httptest.NewRecorder()
+	handler.ServeHTTP(anonymous, httptest.NewRequest(http.MethodPatch, defaultPath, nil))
+	if anonymous.Code != http.StatusUnauthorized {
+		t.Fatalf("anonymous set default status=%d body=%s", anonymous.Code, anonymous.Body.String())
+	}
+	missingCSRF := httptest.NewRecorder()
+	handler.ServeHTTP(missingCSRF, authorizedRequest(http.MethodPatch, defaultPath, nil, owner.Cookie, ""))
+	if missingCSRF.Code != http.StatusForbidden {
+		t.Fatalf("missing CSRF status=%d body=%s", missingCSRF.Code, missingCSRF.Body.String())
+	}
+	forbidden := httptest.NewRecorder()
+	handler.ServeHTTP(forbidden, authorizedRequest(http.MethodPatch, defaultPath, nil, other.Cookie, other.CSRFToken))
+	if forbidden.Code != http.StatusForbidden {
+		t.Fatalf("non-author set default status=%d body=%s", forbidden.Code, forbidden.Body.String())
+	}
+	missing := httptest.NewRecorder()
+	handler.ServeHTTP(missing, authorizedRequest(http.MethodPatch,
+		fmt.Sprintf("/api/v1/videos/%d/subtitles/99999/default", video.ID), nil, owner.Cookie, owner.CSRFToken))
+	if missing.Code != http.StatusNotFound {
+		t.Fatalf("missing subtitle status=%d body=%s", missing.Code, missing.Body.String())
+	}
+
+	setDefault := httptest.NewRecorder()
+	handler.ServeHTTP(setDefault, authorizedRequest(http.MethodPatch, defaultPath, nil, owner.Cookie, owner.CSRFToken))
+	if setDefault.Code != http.StatusOK {
+		t.Fatalf("set default status=%d body=%s", setDefault.Code, setDefault.Body.String())
+	}
+	var setEnvelope testEnvelope
+	decodeResponse(t, setDefault, &setEnvelope)
+	var tracks []domain.SubtitleTrack
+	if err := json.Unmarshal(setEnvelope.Data, &tracks); err != nil || len(tracks) != 2 || tracks[0].ID != second.ID || !tracks[0].IsDefault {
+		t.Fatalf("set default tracks=%#v err=%v", tracks, err)
+	}
+
+	anonymousDelete := httptest.NewRecorder()
+	handler.ServeHTTP(anonymousDelete, httptest.NewRequest(http.MethodDelete, deletePath, nil))
+	if anonymousDelete.Code != http.StatusUnauthorized {
+		t.Fatalf("anonymous delete status=%d body=%s", anonymousDelete.Code, anonymousDelete.Body.String())
+	}
+	missingDeleteCSRF := httptest.NewRecorder()
+	handler.ServeHTTP(missingDeleteCSRF, authorizedRequest(http.MethodDelete, deletePath, nil, owner.Cookie, ""))
+	if missingDeleteCSRF.Code != http.StatusForbidden {
+		t.Fatalf("missing delete CSRF status=%d body=%s", missingDeleteCSRF.Code, missingDeleteCSRF.Body.String())
+	}
+	deleteForbidden := httptest.NewRecorder()
+	handler.ServeHTTP(deleteForbidden, authorizedRequest(http.MethodDelete, deletePath, nil, other.Cookie, other.CSRFToken))
+	if deleteForbidden.Code != http.StatusForbidden {
+		t.Fatalf("non-author delete status=%d body=%s", deleteForbidden.Code, deleteForbidden.Body.String())
+	}
+	deleted := httptest.NewRecorder()
+	handler.ServeHTTP(deleted, authorizedRequest(http.MethodDelete, deletePath, nil, owner.Cookie, owner.CSRFToken))
+	if deleted.Code != http.StatusOK {
+		t.Fatalf("delete default status=%d body=%s", deleted.Code, deleted.Body.String())
+	}
+	var deletedEnvelope testEnvelope
+	decodeResponse(t, deleted, &deletedEnvelope)
+	if err := json.Unmarshal(deletedEnvelope.Data, &tracks); err != nil || len(tracks) != 1 || tracks[0].ID != firstID || !tracks[0].IsDefault {
+		t.Fatalf("delete fallback tracks=%#v err=%v", tracks, err)
+	}
+
+	lastPath := fmt.Sprintf("/api/v1/videos/%d/subtitles/%d", video.ID, firstID)
+	deletedLast := httptest.NewRecorder()
+	handler.ServeHTTP(deletedLast, authorizedRequest(http.MethodDelete, lastPath, nil, owner.Cookie, owner.CSRFToken))
+	if deletedLast.Code != http.StatusOK {
+		t.Fatalf("delete last status=%d body=%s", deletedLast.Code, deletedLast.Body.String())
+	}
+	var lastEnvelope testEnvelope
+	decodeResponse(t, deletedLast, &lastEnvelope)
+	if err := json.Unmarshal(lastEnvelope.Data, &tracks); err != nil || len(tracks) != 0 {
+		t.Fatalf("delete last tracks=%#v err=%v", tracks, err)
+	}
+}
+
+func TestProfileVisibilityCommentsAndPrivateMediaHTTP(t *testing.T) {
+	dir := t.TempDir()
+	mediaDir := filepath.Join(dir, "media")
+	db, err := platform.OpenDatabase(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	cfg := config.Config{MediaDir: mediaDir, SessionTTL: time.Hour, MaxUploadBytes: 10 << 20}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	repo := repository.New(db)
+	handler := New(service.New(repo, cfg, logger), cfg, logger).Routes()
+	ctx := context.Background()
+
+	owner := registerTestUser(t, handler, "http_profile_owner")
+	viewer := registerTestUser(t, handler, "http_profile_viewer")
+
+	unauthorizedProfile := httptest.NewRecorder()
+	handler.ServeHTTP(unauthorizedProfile, httptest.NewRequest(http.MethodPatch, "/api/v1/me/profile", nil))
+	if unauthorizedProfile.Code != http.StatusUnauthorized {
+		t.Fatalf("anonymous profile update status=%d body=%s", unauthorizedProfile.Code, unauthorizedProfile.Body.String())
+	}
+	missingCSRFBody, missingCSRFType := profileBody(t, "http_profile_owner", "bio", false)
+	missingCSRFRequest := authorizedRequest(http.MethodPatch, "/api/v1/me/profile", missingCSRFBody, owner.Cookie, "")
+	missingCSRFRequest.Header.Set("Content-Type", missingCSRFType)
+	missingCSRFResult := httptest.NewRecorder()
+	handler.ServeHTTP(missingCSRFResult, missingCSRFRequest)
+	if missingCSRFResult.Code != http.StatusForbidden {
+		t.Fatalf("profile missing CSRF status=%d body=%s", missingCSRFResult.Code, missingCSRFResult.Body.String())
+	}
+	invalidMultipart := authorizedRequest(http.MethodPatch, "/api/v1/me/profile", strings.NewReader("not multipart"), owner.Cookie, owner.CSRFToken)
+	invalidMultipart.Header.Set("Content-Type", "text/plain")
+	invalidMultipartResult := httptest.NewRecorder()
+	handler.ServeHTTP(invalidMultipartResult, invalidMultipart)
+	if invalidMultipartResult.Code != http.StatusBadRequest {
+		t.Fatalf("invalid profile multipart status=%d body=%s", invalidMultipartResult.Code, invalidMultipartResult.Body.String())
+	}
+
+	profilePayload, profileType := profileBody(t, "http_owner_renamed", "updated profile", true)
+	profileRequest := authorizedRequest(http.MethodPatch, "/api/v1/me/profile", profilePayload, owner.Cookie, owner.CSRFToken)
+	profileRequest.Header.Set("Content-Type", profileType)
+	profileResult := httptest.NewRecorder()
+	handler.ServeHTTP(profileResult, profileRequest)
+	if profileResult.Code != http.StatusOK {
+		t.Fatalf("profile update status=%d body=%s", profileResult.Code, profileResult.Body.String())
+	}
+	var profileEnvelope testEnvelope
+	decodeResponse(t, profileResult, &profileEnvelope)
+	var updatedUser domain.User
+	if err := json.Unmarshal(profileEnvelope.Data, &updatedUser); err != nil {
+		t.Fatal(err)
+	}
+	if updatedUser.Username != "http_owner_renamed" || updatedUser.Bio != "updated profile" ||
+		!strings.HasPrefix(updatedUser.AvatarURL, "/media/avatars/") {
+		t.Fatalf("unexpected updated user: %#v", updatedUser)
+	}
+
+	conflictBody, conflictType := profileBody(t, viewer.User.Username, "conflict", true)
+	conflictRequest := authorizedRequest(http.MethodPatch, "/api/v1/me/profile", conflictBody, owner.Cookie, owner.CSRFToken)
+	conflictRequest.Header.Set("Content-Type", conflictType)
+	conflictResult := httptest.NewRecorder()
+	handler.ServeHTTP(conflictResult, conflictRequest)
+	if conflictResult.Code != http.StatusConflict {
+		t.Fatalf("profile conflict status=%d body=%s", conflictResult.Code, conflictResult.Body.String())
+	}
+	invalidBody, invalidType := profileBody(t, "x", strings.Repeat("a", 301), false)
+	invalidRequest := authorizedRequest(http.MethodPatch, "/api/v1/me/profile", invalidBody, owner.Cookie, owner.CSRFToken)
+	invalidRequest.Header.Set("Content-Type", invalidType)
+	invalidResult := httptest.NewRecorder()
+	handler.ServeHTTP(invalidResult, invalidRequest)
+	if invalidResult.Code != http.StatusBadRequest {
+		t.Fatalf("invalid profile status=%d body=%s", invalidResult.Code, invalidResult.Body.String())
+	}
+
+	statsResult := httptest.NewRecorder()
+	handler.ServeHTTP(statsResult, authorizedRequest(http.MethodGet, "/api/v1/me/creator/stats", nil, owner.Cookie, ""))
+	if statsResult.Code != http.StatusOK || !strings.Contains(statsResult.Body.String(), `"videos_count":0`) {
+		t.Fatalf("empty creator stats status=%d body=%s", statsResult.Code, statsResult.Body.String())
+	}
+	anonymousStats := httptest.NewRecorder()
+	handler.ServeHTTP(anonymousStats, httptest.NewRequest(http.MethodGet, "/api/v1/me/creator/stats", nil))
+	if anonymousStats.Code != http.StatusUnauthorized {
+		t.Fatalf("anonymous creator stats status=%d body=%s", anonymousStats.Code, anonymousStats.Body.String())
+	}
+
+	publicVideo, err := repo.CreateVideo(ctx, domain.NewVideo{
+		UserID: owner.User.ID, Title: "HTTP public", Category: "knowledge", Visibility: "public",
+		VideoPath: "videos/http-public.mp4", MimeType: "video/mp4", SizeBytes: 100,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	unlistedVideo, err := repo.CreateVideo(ctx, domain.NewVideo{
+		UserID: owner.User.ID, Title: "HTTP unlisted", Category: "knowledge", Visibility: "unlisted",
+		VideoPath: "videos/http-unlisted.mp4", MimeType: "video/mp4", SizeBytes: 100,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	privateVideo, err := repo.CreateVideoWithSubtitle(ctx, domain.NewVideo{
+		UserID: owner.User.ID, Title: "HTTP private", Category: "knowledge", Visibility: "private",
+		VideoPath: "videos/http-private.mp4", CoverPath: "covers/http-private.jpg", MimeType: "video/mp4", SizeBytes: 100,
+	}, domain.NewSubtitle{Language: "en", Label: "English", Path: "subtitles/http-private/en.vtt", IsDefault: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE videos SET hls_master_path = 'hls/http-private/master.m3u8' WHERE id = ?`, privateVideo.ID); err != nil {
+		t.Fatal(err)
+	}
+	for path, content := range map[string]string{
+		"videos/http-public.mp4":          "0123456789-public",
+		"videos/http-unlisted.mp4":        "0123456789-unlisted",
+		"videos/http-private.mp4":         "0123456789-private",
+		"covers/http-private.jpg":         "private-cover",
+		"subtitles/http-private/en.vtt":   "WEBVTT\n",
+		"hls/http-private/master.m3u8":    "#EXTM3U\nsegment-001.ts\n",
+		"hls/http-private/segment-001.ts": "transport-stream",
+	} {
+		absolute := filepath.Join(mediaDir, filepath.FromSlash(path))
+		if err := os.MkdirAll(filepath.Dir(absolute), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(absolute, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	editBody, editType := videoVisibilityBody(t, "HTTP unlisted edited", "private")
+	editRequest := authorizedRequest(http.MethodPatch, "/api/v1/videos/"+strconv.FormatInt(unlistedVideo.ID, 10), editBody, owner.Cookie, owner.CSRFToken)
+	editRequest.Header.Set("Content-Type", editType)
+	editResult := httptest.NewRecorder()
+	handler.ServeHTTP(editResult, editRequest)
+	if editResult.Code != http.StatusOK || !strings.Contains(editResult.Body.String(), `"visibility":"private"`) {
+		t.Fatalf("visibility edit status=%d body=%s", editResult.Code, editResult.Body.String())
+	}
+
+	followResult := httptest.NewRecorder()
+	handler.ServeHTTP(followResult, authorizedRequest(http.MethodPost, "/api/v1/users/"+strconv.FormatInt(owner.User.ID, 10)+"/follow", nil, viewer.Cookie, viewer.CSRFToken))
+	if followResult.Code != http.StatusOK {
+		t.Fatalf("follow owner status=%d body=%s", followResult.Code, followResult.Body.String())
+	}
+	for name, test := range map[string]struct {
+		request   *http.Request
+		wantTotal int64
+	}{
+		"public list": {
+			request: httptest.NewRequest(http.MethodGet, "/api/v1/videos", nil), wantTotal: 1,
+		},
+		"creator list": {
+			request: httptest.NewRequest(http.MethodGet, "/api/v1/users/"+strconv.FormatInt(owner.User.ID, 10)+"/videos", nil), wantTotal: 1,
+		},
+		"owner list": {
+			request: authorizedRequest(http.MethodGet, "/api/v1/me/videos", nil, owner.Cookie, ""), wantTotal: 3,
+		},
+		"following list": {
+			request: authorizedRequest(http.MethodGet, "/api/v1/me/following/videos", nil, viewer.Cookie, ""), wantTotal: 1,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			result := httptest.NewRecorder()
+			handler.ServeHTTP(result, test.request)
+			if result.Code != http.StatusOK {
+				t.Fatalf("status=%d body=%s", result.Code, result.Body.String())
+			}
+			var envelope testEnvelope
+			decodeResponse(t, result, &envelope)
+			var page domain.VideoPage
+			if err := json.Unmarshal(envelope.Data, &page); err != nil || page.Total != test.wantTotal {
+				t.Fatalf("page=%#v err=%v", page, err)
+			}
+		})
+	}
+
+	unlistedDetail := httptest.NewRecorder()
+	handler.ServeHTTP(unlistedDetail, httptest.NewRequest(http.MethodGet, "/api/v1/videos/"+strconv.FormatInt(unlistedVideo.ID, 10)+"?count_view=false", nil))
+	if unlistedDetail.Code != http.StatusNotFound {
+		t.Fatalf("edited private detail status=%d body=%s", unlistedDetail.Code, unlistedDetail.Body.String())
+	}
+	privatePath := "/api/v1/videos/" + strconv.FormatInt(privateVideo.ID, 10)
+	anonymousPrivate := httptest.NewRecorder()
+	handler.ServeHTTP(anonymousPrivate, httptest.NewRequest(http.MethodGet, privatePath+"?count_view=false", nil))
+	if anonymousPrivate.Code != http.StatusNotFound {
+		t.Fatalf("anonymous private detail status=%d body=%s", anonymousPrivate.Code, anonymousPrivate.Body.String())
+	}
+	ownerPrivate := httptest.NewRecorder()
+	handler.ServeHTTP(ownerPrivate, authorizedRequest(http.MethodGet, privatePath+"?count_view=false", nil, owner.Cookie, ""))
+	if ownerPrivate.Code != http.StatusOK {
+		t.Fatalf("owner private detail status=%d body=%s", ownerPrivate.Code, ownerPrivate.Body.String())
+	}
+	anonymousComments := httptest.NewRecorder()
+	handler.ServeHTTP(anonymousComments, httptest.NewRequest(http.MethodGet, privatePath+"/comments", nil))
+	if anonymousComments.Code != http.StatusNotFound {
+		t.Fatalf("anonymous private comments status=%d body=%s", anonymousComments.Code, anonymousComments.Body.String())
+	}
+	viewerComment := authorizedRequest(http.MethodPost, privatePath+"/comments", strings.NewReader(`{"content":"blocked"}`), viewer.Cookie, viewer.CSRFToken)
+	viewerComment.Header.Set("Content-Type", "application/json")
+	viewerCommentResult := httptest.NewRecorder()
+	handler.ServeHTTP(viewerCommentResult, viewerComment)
+	if viewerCommentResult.Code != http.StatusNotFound {
+		t.Fatalf("viewer private comment status=%d body=%s", viewerCommentResult.Code, viewerCommentResult.Body.String())
+	}
+	ownerComment := authorizedRequest(http.MethodPost, privatePath+"/comments", strings.NewReader(`{"content":"allowed"}`), owner.Cookie, owner.CSRFToken)
+	ownerComment.Header.Set("Content-Type", "application/json")
+	ownerCommentResult := httptest.NewRecorder()
+	handler.ServeHTTP(ownerCommentResult, ownerComment)
+	if ownerCommentResult.Code != http.StatusCreated || !strings.Contains(ownerCommentResult.Body.String(), `"avatar_url":"`+updatedUser.AvatarURL+`"`) {
+		t.Fatalf("owner private comment status=%d body=%s", ownerCommentResult.Code, ownerCommentResult.Body.String())
+	}
+
+	avatarResult := httptest.NewRecorder()
+	handler.ServeHTTP(avatarResult, httptest.NewRequest(http.MethodGet, updatedUser.AvatarURL, nil))
+	if avatarResult.Code != http.StatusOK {
+		t.Fatalf("public avatar status=%d body=%s", avatarResult.Code, avatarResult.Body.String())
+	}
+	for name, mediaPath := range map[string]string{
+		"source":   "/media/videos/http-private.mp4",
+		"cover":    "/media/covers/http-private.jpg",
+		"subtitle": "/media/subtitles/http-private/en.vtt",
+		"playlist": "/media/hls/http-private/master.m3u8",
+		"segment":  "/media/hls/http-private/segment-001.ts",
+	} {
+		t.Run(name, func(t *testing.T) {
+			anonymous := httptest.NewRecorder()
+			handler.ServeHTTP(anonymous, httptest.NewRequest(http.MethodGet, mediaPath, nil))
+			if anonymous.Code != http.StatusNotFound {
+				t.Fatalf("anonymous status=%d body=%s", anonymous.Code, anonymous.Body.String())
+			}
+			other := httptest.NewRecorder()
+			handler.ServeHTTP(other, authorizedRequest(http.MethodGet, mediaPath, nil, viewer.Cookie, ""))
+			if other.Code != http.StatusNotFound {
+				t.Fatalf("other user status=%d body=%s", other.Code, other.Body.String())
+			}
+			ownerResult := httptest.NewRecorder()
+			handler.ServeHTTP(ownerResult, authorizedRequest(http.MethodGet, mediaPath, nil, owner.Cookie, ""))
+			if ownerResult.Code != http.StatusOK {
+				t.Fatalf("owner status=%d body=%s", ownerResult.Code, ownerResult.Body.String())
+			}
+		})
+	}
+	playlist := httptest.NewRecorder()
+	handler.ServeHTTP(playlist, authorizedRequest(http.MethodGet, "/media/hls/http-private/master.m3u8", nil, owner.Cookie, ""))
+	if playlist.Header().Get("Content-Type") != "application/vnd.apple.mpegurl" {
+		t.Fatalf("playlist content type = %q", playlist.Header().Get("Content-Type"))
+	}
+	segment := httptest.NewRecorder()
+	handler.ServeHTTP(segment, authorizedRequest(http.MethodGet, "/media/hls/http-private/segment-001.ts", nil, owner.Cookie, ""))
+	if segment.Header().Get("Content-Type") != "video/mp2t" {
+		t.Fatalf("segment content type = %q", segment.Header().Get("Content-Type"))
+	}
+	rangeRequest := authorizedRequest(http.MethodGet, "/media/videos/http-private.mp4", nil, owner.Cookie, "")
+	rangeRequest.Header.Set("Range", "bytes=0-4")
+	rangeResult := httptest.NewRecorder()
+	handler.ServeHTTP(rangeResult, rangeRequest)
+	if rangeResult.Code != http.StatusPartialContent || rangeResult.Body.Len() != 5 || rangeResult.Header().Get("Content-Range") == "" {
+		t.Fatalf("private range status=%d bytes=%d content-range=%q", rangeResult.Code, rangeResult.Body.Len(), rangeResult.Header().Get("Content-Range"))
+	}
+	if publicVideo.ID == 0 {
+		t.Fatal("public video was not created")
+	}
+}
+
 func registerTestUser(t *testing.T, handler http.Handler, username string) testAuthClient {
 	t.Helper()
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/auth/register", strings.NewReader(`{"username":"`+username+`","password":"password123"}`))
@@ -447,6 +818,41 @@ func videoEditBody(t *testing.T, title, description, category string) (*bytes.Bu
 	return &body, writer.FormDataContentType()
 }
 
+func profileBody(t *testing.T, username, bio string, avatar bool) (*bytes.Buffer, string) {
+	t.Helper()
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	_ = writer.WriteField("username", username)
+	_ = writer.WriteField("bio", bio)
+	if avatar {
+		part, err := writer.CreateFormFile("avatar", "avatar.png")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := part.Write([]byte("\x89PNG\r\n\x1a\navatar")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return &body, writer.FormDataContentType()
+}
+
+func videoVisibilityBody(t *testing.T, title, visibility string) (*bytes.Buffer, string) {
+	t.Helper()
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	_ = writer.WriteField("title", title)
+	_ = writer.WriteField("description", "visibility edit")
+	_ = writer.WriteField("category", service.Categories[0])
+	_ = writer.WriteField("visibility", visibility)
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return &body, writer.FormDataContentType()
+}
+
 func authorizedRequest(method, path string, body io.Reader, cookie *http.Cookie, csrf string) *http.Request {
 	request := httptest.NewRequest(method, path, body)
 	request.AddCookie(cookie)
@@ -458,5 +864,28 @@ func decodeResponse(t *testing.T, recorder *httptest.ResponseRecorder, target an
 	t.Helper()
 	if err := json.NewDecoder(recorder.Body).Decode(target); err != nil {
 		t.Fatalf("decode response: %v", err)
+	}
+}
+
+func TestResolveServedMediaPathRejectsSymlinkEscape(t *testing.T) {
+	dir := t.TempDir()
+	mediaDir := filepath.Join(dir, "media")
+	outsideDir := filepath.Join(dir, "outside")
+	if err := os.MkdirAll(mediaDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(outsideDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(outsideDir, "secret.txt")
+	if err := os.WriteFile(outside, []byte("secret"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(mediaDir, "linked.txt")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skipf("symlink unavailable on this platform: %v", err)
+	}
+	if _, err := resolveServedMediaPath(mediaDir, "linked.txt"); err == nil {
+		t.Fatal("symlink escaping media root was accepted")
 	}
 }

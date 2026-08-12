@@ -9,6 +9,10 @@
 *.pfx
 *.crt
 *.cer
+/.secrets/
+/secrets/
+/certs/
+/tls/
 *.sqlite
 *.sqlite3
 *.sqlite-*
@@ -18,6 +22,12 @@
 *-shm
 backend/data/
 backend/media/
+/media/
+/uploads/
+/hls/
+/covers/
+/avatars/
+/subtitles/
 backend/gvideo.exe
 backend/*.exe
 backend/*.test

@@ -59,13 +59,15 @@ func (h *Handler) Routes() http.Handler {
 	router.Use(h.optionalSession)
 
 	router.Get("/healthz", h.health)
-	router.Handle("/media/*", http.StripPrefix("/media/", mediaFileServer(h.cfg.MediaDir)))
+	router.Get("/media/*", h.media)
 	router.Route("/api/v1", func(api chi.Router) {
 		api.Get("/categories", h.categories)
 		api.Post("/auth/register", h.register)
 		api.Post("/auth/login", h.login)
 		api.With(h.requireAuth, h.requireCSRF).Post("/auth/logout", h.logout)
 		api.With(h.requireAuth).Get("/auth/me", h.me)
+		api.With(h.requireAuth, h.requireCSRF).Patch("/me/profile", h.updateProfile)
+		api.With(h.requireAuth).Get("/me/creator/stats", h.creatorStats)
 
 		api.Get("/videos", h.listVideos)
 		api.Get("/videos/{videoID}", h.getVideo)
@@ -75,6 +77,8 @@ func (h *Handler) Routes() http.Handler {
 		api.With(h.requireAuth, h.requireCSRF).Delete("/videos/{videoID}", h.deleteVideo)
 		api.With(h.requireAuth, h.requireCSRF).Post("/videos/{videoID}/retry", h.retryVideo)
 		api.With(h.requireAuth, h.requireCSRF).Post("/videos/{videoID}/subtitles", h.uploadSubtitle)
+		api.With(h.requireAuth, h.requireCSRF).Patch("/videos/{videoID}/subtitles/{subtitleID}/default", h.setDefaultSubtitle)
+		api.With(h.requireAuth, h.requireCSRF).Delete("/videos/{videoID}/subtitles/{subtitleID}", h.deleteSubtitle)
 		api.With(h.requireAuth, h.requireCSRF).Post("/videos/{videoID}/like", h.toggleLike)
 		api.With(h.requireAuth, h.requireCSRF).Post("/videos/{videoID}/favorite", h.toggleFavorite)
 		api.With(h.requireAuth, h.requireCSRF).Post("/videos/{videoID}/comments", h.createComment)
@@ -87,19 +91,62 @@ func (h *Handler) Routes() http.Handler {
 	return router
 }
 
-func mediaFileServer(mediaDir string) http.Handler {
-	files := http.FileServer(http.Dir(mediaDir))
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch strings.ToLower(filepath.Ext(r.URL.Path)) {
-		case ".m3u8":
-			w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
-		case ".ts":
-			w.Header().Set("Content-Type", "video/mp2t")
-		case ".vtt":
-			w.Header().Set("Content-Type", "text/vtt; charset=utf-8")
+func (h *Handler) media(w http.ResponseWriter, r *http.Request) {
+	storedPath := strings.TrimPrefix(strings.ReplaceAll(chi.URLParam(r, "*"), `\`, "/"), "/")
+	if storedPath == "" || strings.Contains(storedPath, "\x00") {
+		http.NotFound(w, r)
+		return
+	}
+	cleanPath := filepath.ToSlash(filepath.Clean(filepath.FromSlash(storedPath)))
+	if cleanPath == "." || cleanPath == ".." || strings.HasPrefix(cleanPath, "../") {
+		http.NotFound(w, r)
+		return
+	}
+	if err := h.service.AuthorizeMedia(r.Context(), cleanPath, viewerID(r.Context())); err != nil {
+		if !errors.Is(err, domain.ErrNotFound) {
+			h.logger.Error("authorize media", "request_id", requestID(r), "path", cleanPath, "error", err)
 		}
-		files.ServeHTTP(w, r)
-	})
+		http.NotFound(w, r)
+		return
+	}
+	resolved, err := resolveServedMediaPath(h.cfg.MediaDir, cleanPath)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	switch strings.ToLower(filepath.Ext(cleanPath)) {
+	case ".m3u8":
+		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+	case ".ts":
+		w.Header().Set("Content-Type", "video/mp2t")
+	case ".vtt":
+		w.Header().Set("Content-Type", "text/vtt; charset=utf-8")
+	}
+	http.ServeFile(w, r, resolved)
+}
+
+func resolveServedMediaPath(root, storedPath string) (string, error) {
+	absoluteRoot, err := filepath.Abs(root)
+	if err != nil {
+		return "", err
+	}
+	resolved, err := filepath.Abs(filepath.Join(absoluteRoot, filepath.FromSlash(storedPath)))
+	if err != nil {
+		return "", err
+	}
+	realRoot, err := filepath.EvalSymlinks(absoluteRoot)
+	if err != nil {
+		return "", err
+	}
+	realResolved, err := filepath.EvalSymlinks(resolved)
+	if err != nil {
+		return "", err
+	}
+	relative, err := filepath.Rel(realRoot, realResolved)
+	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("media path escapes media directory")
+	}
+	return realResolved, nil
 }
 
 func (h *Handler) health(w http.ResponseWriter, r *http.Request) {
@@ -163,6 +210,37 @@ func (h *Handler) me(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, r, http.StatusOK, map[string]any{"user": session.User, "csrf_token": session.CSRFToken})
 }
 
+func (h *Handler) updateProfile(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 11<<20)
+	if err := r.ParseMultipartForm(11 << 20); err != nil {
+		writeProblem(w, r, http.StatusBadRequest, "资料内容过大或格式无效")
+		return
+	}
+	avatar, err := fileHeader(r, "avatar", false)
+	if err != nil {
+		writeProblem(w, r, http.StatusBadRequest, "头像文件无效")
+		return
+	}
+	updated, err := h.service.UpdateProfile(r.Context(), service.UpdateProfileInput{
+		UserID: sessionFrom(r.Context()).User.ID, Username: r.FormValue("username"),
+		Bio: r.FormValue("bio"), Avatar: avatar,
+	})
+	if err != nil {
+		h.writeError(w, r, err)
+		return
+	}
+	writeJSON(w, r, http.StatusOK, updated)
+}
+
+func (h *Handler) creatorStats(w http.ResponseWriter, r *http.Request) {
+	stats, err := h.service.CreatorStats(r.Context(), sessionFrom(r.Context()).User.ID)
+	if err != nil {
+		h.writeError(w, r, err)
+		return
+	}
+	writeJSON(w, r, http.StatusOK, stats)
+}
+
 func (h *Handler) listVideos(w http.ResponseWriter, r *http.Request) {
 	page, pageSize := pagination(r, 24)
 	filter := domain.VideoFilter{
@@ -180,7 +258,9 @@ func (h *Handler) listVideos(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) myVideos(w http.ResponseWriter, r *http.Request) {
 	userID := sessionFrom(r.Context()).User.ID
 	page, pageSize := pagination(r, 12)
-	result, err := h.service.ListVideos(r.Context(), domain.VideoFilter{UserID: userID, Limit: pageSize, Offset: (page - 1) * pageSize}, userID)
+	result, err := h.service.ListVideos(r.Context(), domain.VideoFilter{
+		UserID: userID, IncludeNonPublic: true, Limit: pageSize, Offset: (page - 1) * pageSize,
+	}, userID)
 	if err != nil {
 		h.writeError(w, r, err)
 		return
@@ -277,7 +357,7 @@ func (h *Handler) uploadVideo(w http.ResponseWriter, r *http.Request) {
 	}
 	created, err := h.service.UploadVideo(r.Context(), service.UploadInput{
 		UserID: sessionFrom(r.Context()).User.ID, Title: r.FormValue("title"), Description: r.FormValue("description"),
-		Category: r.FormValue("category"), Video: video, Cover: cover, Subtitle: subtitle,
+		Category: r.FormValue("category"), Visibility: r.FormValue("visibility"), Video: video, Cover: cover, Subtitle: subtitle,
 		SubtitleLanguage: r.FormValue("subtitle_language"), SubtitleLabel: r.FormValue("subtitle_label"),
 	})
 	if err != nil {
@@ -310,6 +390,40 @@ func (h *Handler) uploadSubtitle(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, r, http.StatusCreated, track)
 }
 
+func (h *Handler) setDefaultSubtitle(w http.ResponseWriter, r *http.Request) {
+	videoID, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	subtitleID, ok := subtitlePathID(w, r)
+	if !ok {
+		return
+	}
+	tracks, err := h.service.SetDefaultSubtitle(r.Context(), sessionFrom(r.Context()).User.ID, videoID, subtitleID)
+	if err != nil {
+		h.writeError(w, r, err)
+		return
+	}
+	writeJSON(w, r, http.StatusOK, tracks)
+}
+
+func (h *Handler) deleteSubtitle(w http.ResponseWriter, r *http.Request) {
+	videoID, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	subtitleID, ok := subtitlePathID(w, r)
+	if !ok {
+		return
+	}
+	tracks, err := h.service.DeleteSubtitle(r.Context(), sessionFrom(r.Context()).User.ID, videoID, subtitleID)
+	if err != nil {
+		h.writeError(w, r, err)
+		return
+	}
+	writeJSON(w, r, http.StatusOK, tracks)
+}
+
 func (h *Handler) updateVideo(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
@@ -327,7 +441,8 @@ func (h *Handler) updateVideo(w http.ResponseWriter, r *http.Request) {
 	}
 	updated, err := h.service.UpdateVideo(r.Context(), service.UpdateVideoInput{
 		UserID: sessionFrom(r.Context()).User.ID, VideoID: id,
-		Title: r.FormValue("title"), Description: r.FormValue("description"), Category: r.FormValue("category"), Cover: cover,
+		Title: r.FormValue("title"), Description: r.FormValue("description"), Category: r.FormValue("category"),
+		Visibility: r.FormValue("visibility"), Cover: cover,
 	})
 	if err != nil {
 		h.writeError(w, r, err)
@@ -386,7 +501,7 @@ func (h *Handler) listComments(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	comments, err := h.service.Comments(r.Context(), id)
+	comments, err := h.service.Comments(r.Context(), id, viewerID(r.Context()))
 	if err != nil {
 		h.writeError(w, r, err)
 		return
@@ -552,6 +667,15 @@ func userPathID(w http.ResponseWriter, r *http.Request) (int64, bool) {
 	id, err := strconv.ParseInt(chi.URLParam(r, "userID"), 10, 64)
 	if err != nil || id <= 0 {
 		writeProblem(w, r, http.StatusBadRequest, "用户编号无效")
+		return 0, false
+	}
+	return id, true
+}
+
+func subtitlePathID(w http.ResponseWriter, r *http.Request) (int64, bool) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "subtitleID"), 10, 64)
+	if err != nil || id <= 0 {
+		writeProblem(w, r, http.StatusBadRequest, "字幕编号无效")
 		return 0, false
 	}
 	return id, true

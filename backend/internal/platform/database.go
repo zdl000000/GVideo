@@ -1,9 +1,11 @@
 package platform
 
 import (
+	"bufio"
 	"context"
 	"database/sql"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -56,6 +58,27 @@ func OpenDatabase(path string) (*sql.DB, error) {
 	return db, nil
 }
 
+func OpenDatabaseReadOnly(path string) (*sql.DB, error) {
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return nil, fmt.Errorf("resolve sqlite path: %w", err)
+	}
+	if _, err := os.Stat(absolute); err != nil {
+		return nil, fmt.Errorf("inspect sqlite database: %w", err)
+	}
+	dsn := "file:" + filepath.ToSlash(absolute) + "?mode=ro&_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)"
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("open sqlite read-only: %w", err)
+	}
+	db.SetMaxOpenConns(1)
+	if err := db.Ping(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("ping sqlite read-only: %w", err)
+	}
+	return db, nil
+}
+
 func migrate(db *sql.DB) error {
 	const schema = `
 CREATE TABLE IF NOT EXISTS users (
@@ -63,6 +86,7 @@ CREATE TABLE IF NOT EXISTS users (
   username TEXT NOT NULL COLLATE NOCASE UNIQUE,
   password_hash TEXT NOT NULL,
   bio TEXT NOT NULL DEFAULT '',
+  avatar_path TEXT NOT NULL DEFAULT '',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS sessions (
@@ -85,8 +109,11 @@ CREATE TABLE IF NOT EXISTS videos (
   cover_path TEXT NOT NULL DEFAULT '',
   mime_type TEXT NOT NULL,
   duration_seconds REAL NOT NULL DEFAULT 0,
-  size_bytes INTEGER NOT NULL,
+	size_bytes INTEGER NOT NULL,
 	processing_status TEXT NOT NULL DEFAULT 'ready',
+	processing_progress INTEGER NOT NULL DEFAULT 100,
+	processing_stage TEXT NOT NULL DEFAULT 'ready',
+	visibility TEXT NOT NULL DEFAULT 'public' CHECK (visibility IN ('public', 'unlisted', 'private')),
 	source_width INTEGER NOT NULL DEFAULT 0,
 	source_height INTEGER NOT NULL DEFAULT 0,
 	source_bitrate INTEGER NOT NULL DEFAULT 0,
@@ -156,31 +183,60 @@ CREATE INDEX IF NOT EXISTS idx_transcoding_jobs_claim ON transcoding_jobs(status
 		return fmt.Errorf("migrate database: %w", err)
 	}
 	columns := []struct {
+		table      string
 		name       string
 		definition string
 	}{
-		{"processing_status", "TEXT NOT NULL DEFAULT 'ready'"},
-		{"hls_master_path", "TEXT NOT NULL DEFAULT ''"},
-		{"source_width", "INTEGER NOT NULL DEFAULT 0"},
-		{"source_height", "INTEGER NOT NULL DEFAULT 0"},
-		{"source_bitrate", "INTEGER NOT NULL DEFAULT 0"},
-		{"video_codec", "TEXT NOT NULL DEFAULT ''"},
-		{"audio_codec", "TEXT NOT NULL DEFAULT ''"},
-		{"processing_error", "TEXT NOT NULL DEFAULT ''"},
-		{"processed_at", "DATETIME"},
+		{"users", "avatar_path", "TEXT NOT NULL DEFAULT ''"},
+		{"videos", "processing_status", "TEXT NOT NULL DEFAULT 'ready'"},
+		{"videos", "processing_progress", "INTEGER NOT NULL DEFAULT 100"},
+		{"videos", "processing_stage", "TEXT NOT NULL DEFAULT 'ready'"},
+		{"videos", "visibility", "TEXT NOT NULL DEFAULT 'public'"},
+		{"videos", "hls_master_path", "TEXT NOT NULL DEFAULT ''"},
+		{"videos", "source_width", "INTEGER NOT NULL DEFAULT 0"},
+		{"videos", "source_height", "INTEGER NOT NULL DEFAULT 0"},
+		{"videos", "source_bitrate", "INTEGER NOT NULL DEFAULT 0"},
+		{"videos", "video_codec", "TEXT NOT NULL DEFAULT ''"},
+		{"videos", "audio_codec", "TEXT NOT NULL DEFAULT ''"},
+		{"videos", "processing_error", "TEXT NOT NULL DEFAULT ''"},
+		{"videos", "processed_at", "DATETIME"},
 	}
+	addedColumns := make(map[string]bool)
 	for _, column := range columns {
-		if err := ensureColumn(db, "videos", column.name, column.definition); err != nil {
-			return fmt.Errorf("migrate videos.%s: %w", column.name, err)
+		added, err := ensureColumn(db, column.table, column.name, column.definition)
+		if err != nil {
+			return fmt.Errorf("migrate %s.%s: %w", column.table, column.name, err)
+		}
+		addedColumns[column.table+"."+column.name] = added
+	}
+	if addedColumns["videos.processing_progress"] {
+		if _, err := db.Exec(`
+UPDATE videos SET processing_progress = CASE processing_status
+  WHEN 'ready' THEN 100
+  WHEN 'processing' THEN 35
+  ELSE 0
+END`); err != nil {
+			return fmt.Errorf("backfill videos.processing_progress: %w", err)
+		}
+	}
+	if addedColumns["videos.processing_stage"] {
+		if _, err := db.Exec(`
+UPDATE videos SET processing_stage = CASE processing_status
+  WHEN 'ready' THEN 'ready'
+  WHEN 'processing' THEN 'transcoding'
+  WHEN 'failed' THEN 'failed'
+  ELSE 'queued'
+END`); err != nil {
+			return fmt.Errorf("backfill videos.processing_stage: %w", err)
 		}
 	}
 	return nil
 }
 
-func ensureColumn(db *sql.DB, table, name, definition string) error {
+func ensureColumn(db *sql.DB, table, name, definition string) (bool, error) {
 	rows, err := db.Query(`PRAGMA table_info(` + table + `)`)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer rows.Close()
 	for rows.Next() {
@@ -189,17 +245,17 @@ func ensureColumn(db *sql.DB, table, name, definition string) error {
 		var notNull, primaryKey int
 		var defaultValue sql.NullString
 		if err := rows.Scan(&cid, &columnName, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
-			return err
+			return false, err
 		}
 		if columnName == name {
-			return nil
+			return false, nil
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return err
+		return false, err
 	}
 	_, err = db.Exec(`ALTER TABLE ` + table + ` ADD COLUMN ` + name + ` ` + definition)
-	return err
+	return err == nil, err
 }
 
 func ReadDatabaseStats(ctx context.Context, db *sql.DB) (DatabaseStats, error) {
@@ -233,6 +289,241 @@ func ReadDatabaseStats(ctx context.Context, db *sql.DB) (DatabaseStats, error) {
 		}
 	}
 	return stats, nil
+}
+
+func VerifyDatabase(ctx context.Context, db *sql.DB) error {
+	rows, err := db.QueryContext(ctx, `PRAGMA integrity_check`)
+	if err != nil {
+		return fmt.Errorf("check sqlite integrity: %w", err)
+	}
+	defer rows.Close()
+	var problems []string
+	for rows.Next() {
+		var result string
+		if err := rows.Scan(&result); err != nil {
+			return fmt.Errorf("read sqlite integrity result: %w", err)
+		}
+		if result != "ok" && len(problems) < 5 {
+			problems = append(problems, result)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate sqlite integrity results: %w", err)
+	}
+	if len(problems) > 0 {
+		return fmt.Errorf("sqlite integrity check failed: %s", strings.Join(problems, "; "))
+	}
+	foreignKeyRows, err := db.QueryContext(ctx, `PRAGMA foreign_key_check`)
+	if err != nil {
+		return fmt.Errorf("check sqlite foreign keys: %w", err)
+	}
+	defer foreignKeyRows.Close()
+	problems = problems[:0]
+	for foreignKeyRows.Next() {
+		var table, parent string
+		var rowID sql.NullInt64
+		var foreignKeyID int64
+		if err := foreignKeyRows.Scan(&table, &rowID, &parent, &foreignKeyID); err != nil {
+			return fmt.Errorf("read sqlite foreign key result: %w", err)
+		}
+		if len(problems) < 5 {
+			problems = append(problems, fmt.Sprintf("%s row %d references %s (fk %d)", table, rowID.Int64, parent, foreignKeyID))
+		}
+	}
+	if err := foreignKeyRows.Err(); err != nil {
+		return fmt.Errorf("iterate sqlite foreign key results: %w", err)
+	}
+	if len(problems) > 0 {
+		return fmt.Errorf("sqlite foreign key check failed: %s", strings.Join(problems, "; "))
+	}
+	return nil
+}
+
+func VerifyMediaFiles(ctx context.Context, db *sql.DB, mediaDir string) error {
+	root, err := filepath.Abs(mediaDir)
+	if err != nil {
+		return fmt.Errorf("resolve media directory: %w", err)
+	}
+	verifyFile := func(kind string, id int64, relative string, expectedSize int64) error {
+		if relative == "" {
+			return nil
+		}
+		absolute, err := secureMediaPath(root, relative)
+		if err != nil {
+			return fmt.Errorf("%s %d: %w", kind, id, err)
+		}
+		info, err := os.Stat(absolute)
+		if err != nil {
+			return fmt.Errorf("%s %d file %q: %w", kind, id, relative, err)
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("%s %d file %q is not regular", kind, id, relative)
+		}
+		if expectedSize >= 0 && info.Size() != expectedSize {
+			return fmt.Errorf("%s %d file %q size is %d, want %d", kind, id, relative, info.Size(), expectedSize)
+		}
+		return nil
+	}
+
+	rows, err := db.QueryContext(ctx, `SELECT id, avatar_path FROM users WHERE avatar_path <> ''`)
+	if err != nil {
+		return fmt.Errorf("read avatar references: %w", err)
+	}
+	for rows.Next() {
+		var id int64
+		var path string
+		if err := rows.Scan(&id, &path); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan avatar reference: %w", err)
+		}
+		if err := verifyFile("avatar", id, path, -1); err != nil {
+			rows.Close()
+			return err
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("iterate avatar references: %w", err)
+	}
+	rows.Close()
+
+	rows, err = db.QueryContext(ctx, `SELECT id, video_path, size_bytes, cover_path, hls_master_path FROM videos`)
+	if err != nil {
+		return fmt.Errorf("read video media references: %w", err)
+	}
+	var playlists []struct {
+		id   int64
+		path string
+	}
+	for rows.Next() {
+		var id, size int64
+		var videoPath, coverPath, hlsPath string
+		if err := rows.Scan(&id, &videoPath, &size, &coverPath, &hlsPath); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan video media reference: %w", err)
+		}
+		if err := verifyFile("video", id, videoPath, size); err != nil {
+			rows.Close()
+			return err
+		}
+		if err := verifyFile("cover", id, coverPath, -1); err != nil {
+			rows.Close()
+			return err
+		}
+		if err := verifyFile("HLS master", id, hlsPath, -1); err != nil {
+			rows.Close()
+			return err
+		}
+		if hlsPath != "" {
+			playlists = append(playlists, struct {
+				id   int64
+				path string
+			}{id: id, path: hlsPath})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("iterate video media references: %w", err)
+	}
+	rows.Close()
+
+	rows, err = db.QueryContext(ctx, `SELECT id, subtitle_path FROM video_subtitles WHERE subtitle_path <> ''`)
+	if err != nil {
+		return fmt.Errorf("read subtitle references: %w", err)
+	}
+	for rows.Next() {
+		var id int64
+		var path string
+		if err := rows.Scan(&id, &path); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan subtitle reference: %w", err)
+		}
+		if err := verifyFile("subtitle", id, path, -1); err != nil {
+			rows.Close()
+			return err
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("iterate subtitle references: %w", err)
+	}
+	rows.Close()
+
+	visited := make(map[string]bool)
+	for _, playlist := range playlists {
+		if err := verifyHLSPlaylist(root, playlist.path, visited); err != nil {
+			return fmt.Errorf("video %d HLS: %w", playlist.id, err)
+		}
+	}
+	return nil
+}
+
+func secureMediaPath(root, relative string) (string, error) {
+	portable := strings.ReplaceAll(strings.TrimSpace(relative), `\`, "/")
+	clean := filepath.Clean(filepath.FromSlash(portable))
+	if clean == "." || filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("unsafe media path %q", relative)
+	}
+	absolute := filepath.Join(root, clean)
+	rootPrefix := root + string(filepath.Separator)
+	if absolute != root && !strings.HasPrefix(absolute, rootPrefix) {
+		return "", fmt.Errorf("media path escapes root: %q", relative)
+	}
+	return absolute, nil
+}
+
+func verifyHLSPlaylist(root, relative string, visited map[string]bool) error {
+	portable := strings.ReplaceAll(relative, `\`, "/")
+	normalized := filepath.ToSlash(filepath.Clean(filepath.FromSlash(portable)))
+	if visited[normalized] {
+		return nil
+	}
+	visited[normalized] = true
+	absolute, err := secureMediaPath(root, normalized)
+	if err != nil {
+		return err
+	}
+	file, err := os.Open(absolute)
+	if err != nil {
+		return fmt.Errorf("open playlist %q: %w", relative, err)
+	}
+	defer file.Close()
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		reference, err := url.Parse(line)
+		if err != nil || reference.IsAbs() || reference.Host != "" || strings.HasPrefix(reference.Path, "/") {
+			return fmt.Errorf("playlist %q has unsupported reference %q", relative, line)
+		}
+		referencedPath, err := url.PathUnescape(reference.Path)
+		if err != nil {
+			return fmt.Errorf("playlist %q has invalid escaped path %q", relative, line)
+		}
+		child := filepath.ToSlash(filepath.Clean(filepath.Join(filepath.Dir(filepath.FromSlash(normalized)), filepath.FromSlash(referencedPath))))
+		childAbsolute, err := secureMediaPath(root, child)
+		if err != nil {
+			return fmt.Errorf("playlist %q reference %q: %w", relative, line, err)
+		}
+		info, err := os.Stat(childAbsolute)
+		if err != nil {
+			return fmt.Errorf("playlist %q reference %q: %w", relative, line, err)
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("playlist %q reference %q is not regular", relative, line)
+		}
+		if strings.EqualFold(filepath.Ext(child), ".m3u8") {
+			if err := verifyHLSPlaylist(root, child, visited); err != nil {
+				return err
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("read playlist %q: %w", relative, err)
+	}
+	return nil
 }
 
 func BackupDatabase(ctx context.Context, db *sql.DB, destination string) error {
@@ -279,7 +570,15 @@ func MergeDatabase(ctx context.Context, db *sql.DB, source string) (MergeStats, 
 		return MergeStats{}, fmt.Errorf("begin database merge: %w", err)
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `
+	sourceHasAvatar, err := databaseColumnExists(ctx, tx, "source_db", "users", "avatar_path")
+	if err != nil {
+		return MergeStats{}, fmt.Errorf("inspect source user columns: %w", err)
+	}
+	sourceAvatarExpression := "''"
+	if sourceHasAvatar {
+		sourceAvatarExpression = "su.avatar_path"
+	}
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`
 DROP TABLE IF EXISTS merge_user_map;
 CREATE TEMP TABLE merge_user_map (
   source_id INTEGER PRIMARY KEY,
@@ -290,21 +589,21 @@ CREATE TEMP TABLE merge_user_map (
 INSERT INTO merge_user_map(source_id, target_id)
 SELECT su.id, u.id FROM source_db.users su
 JOIN users u ON u.username = su.username AND u.password_hash = su.password_hash;
-INSERT OR IGNORE INTO users(username, password_hash, bio, created_at)
-SELECT su.username, su.password_hash, su.bio, su.created_at
+INSERT OR IGNORE INTO users(username, password_hash, bio, avatar_path, created_at)
+SELECT su.username, su.password_hash, su.bio, %s, su.created_at
 FROM source_db.users su
 WHERE NOT EXISTS (SELECT 1 FROM users u WHERE u.username = su.username);
 INSERT OR IGNORE INTO merge_user_map(source_id, target_id, added)
 SELECT su.id, u.id, 1 FROM source_db.users su
 JOIN users u ON u.username = su.username AND u.password_hash = su.password_hash;
-INSERT OR IGNORE INTO users(username, password_hash, bio, created_at)
-SELECT su.username || '-local-' || su.id, su.password_hash, su.bio, su.created_at
+INSERT OR IGNORE INTO users(username, password_hash, bio, avatar_path, created_at)
+SELECT su.username || '-local-' || su.id, su.password_hash, su.bio, %s, su.created_at
 FROM source_db.users su
 WHERE NOT EXISTS (SELECT 1 FROM merge_user_map m WHERE m.source_id = su.id);
 INSERT OR IGNORE INTO merge_user_map(source_id, target_id, renamed, added)
 SELECT su.id, u.id, 1, 1 FROM source_db.users su
 JOIN users u ON u.username = su.username || '-local-' || su.id
-WHERE NOT EXISTS (SELECT 1 FROM merge_user_map m WHERE m.source_id = su.id);`); err != nil {
+WHERE NOT EXISTS (SELECT 1 FROM merge_user_map m WHERE m.source_id = su.id);`, sourceAvatarExpression, sourceAvatarExpression)); err != nil {
 		return MergeStats{}, fmt.Errorf("map merge users: %w", err)
 	}
 	sourceHasHLS, err := databaseColumnExists(ctx, tx, "source_db", "videos", "hls_master_path")
@@ -315,6 +614,61 @@ WHERE NOT EXISTS (SELECT 1 FROM merge_user_map m WHERE m.source_id = su.id);`); 
 	if sourceHasHLS {
 		sourceHLSExpression = "v.hls_master_path"
 	}
+	sourceHasVisibility, err := databaseColumnExists(ctx, tx, "source_db", "videos", "visibility")
+	if err != nil {
+		return MergeStats{}, fmt.Errorf("inspect source video visibility: %w", err)
+	}
+	sourceVisibilityExpression := "'public'"
+	if sourceHasVisibility {
+		sourceVisibilityExpression = `CASE
+  WHEN v.visibility IN ('public', 'unlisted', 'private') THEN v.visibility
+  ELSE 'private'
+END`
+	}
+	sourceHasProcessingProgress, err := databaseColumnExists(ctx, tx, "source_db", "videos", "processing_progress")
+	if err != nil {
+		return MergeStats{}, fmt.Errorf("inspect source video processing progress: %w", err)
+	}
+	sourceProcessingProgressExpression := `CASE v.processing_status
+  WHEN 'ready' THEN 100
+  WHEN 'processing' THEN 35
+  ELSE 0
+END`
+	if sourceHasProcessingProgress {
+		sourceProcessingProgressExpression = "v.processing_progress"
+	}
+	sourceHasProcessingStage, err := databaseColumnExists(ctx, tx, "source_db", "videos", "processing_stage")
+	if err != nil {
+		return MergeStats{}, fmt.Errorf("inspect source video processing stage: %w", err)
+	}
+	sourceProcessingStageExpression := `CASE v.processing_status
+  WHEN 'ready' THEN 'ready'
+  WHEN 'processing' THEN 'transcoding'
+  WHEN 'failed' THEN 'failed'
+  ELSE 'queued'
+END`
+	if sourceHasProcessingStage {
+		sourceProcessingStageExpression = "v.processing_stage"
+	}
+	sourceVideoExpressions := map[string]string{
+		"source_width":     "0",
+		"source_height":    "0",
+		"source_bitrate":   "0",
+		"video_codec":      "''",
+		"audio_codec":      "''",
+		"processing_error": "''",
+		"processed_at":     "NULL",
+	}
+	for column, fallback := range sourceVideoExpressions {
+		exists, err := databaseColumnExists(ctx, tx, "source_db", "videos", column)
+		if err != nil {
+			return MergeStats{}, fmt.Errorf("inspect source video %s: %w", column, err)
+		}
+		if exists {
+			sourceVideoExpressions[column] = "v." + column
+		}
+		_ = fallback
+	}
 	sourceHasSubtitles, err := databaseTableExists(ctx, tx, "source_db", "video_subtitles")
 	if err != nil {
 		return MergeStats{}, fmt.Errorf("inspect source subtitle table: %w", err)
@@ -322,6 +676,10 @@ WHERE NOT EXISTS (SELECT 1 FROM merge_user_map m WHERE m.source_id = su.id);`); 
 	sourceHasFollows, err := databaseTableExists(ctx, tx, "source_db", "user_follows")
 	if err != nil {
 		return MergeStats{}, fmt.Errorf("inspect source follows table: %w", err)
+	}
+	sourceHasTranscodingJobs, err := databaseTableExists(ctx, tx, "source_db", "transcoding_jobs")
+	if err != nil {
+		return MergeStats{}, fmt.Errorf("inspect source transcoding jobs table: %w", err)
 	}
 
 	statements := []struct {
@@ -332,14 +690,18 @@ WHERE NOT EXISTS (SELECT 1 FROM merge_user_map m WHERE m.source_id = su.id);`); 
 SELECT s.token_hash, m.target_id, s.csrf_token, s.expires_at, s.created_at
 FROM source_db.sessions s JOIN merge_user_map m ON m.source_id = s.user_id`},
 		{"videos", fmt.Sprintf(`INSERT INTO videos(
-  user_id, title, description, category, video_path, hls_master_path, cover_path, mime_type, duration_seconds, size_bytes,
-  processing_status, source_width, source_height, source_bitrate, video_codec, audio_codec,
+  user_id, title, description, category, visibility, video_path, hls_master_path, cover_path, mime_type, duration_seconds, size_bytes,
+  processing_status, processing_progress, processing_stage, source_width, source_height, source_bitrate, video_codec, audio_codec,
   processing_error, processed_at, views_count, created_at)
-SELECT m.target_id, v.title, v.description, v.category, v.video_path, %s, v.cover_path, v.mime_type, v.duration_seconds, v.size_bytes,
-  v.processing_status, v.source_width, v.source_height, v.source_bitrate, v.video_codec, v.audio_codec,
-  v.processing_error, v.processed_at, v.views_count, v.created_at
+SELECT m.target_id, v.title, v.description, v.category, %s, v.video_path, %s, v.cover_path, v.mime_type, v.duration_seconds, v.size_bytes,
+  v.processing_status, %s, %s, %s, %s, %s, %s, %s,
+  %s, %s, v.views_count, v.created_at
 FROM source_db.videos v JOIN merge_user_map m ON m.source_id = v.user_id
-WHERE NOT EXISTS (SELECT 1 FROM videos existing WHERE existing.video_path = v.video_path)`, sourceHLSExpression)},
+WHERE NOT EXISTS (SELECT 1 FROM videos existing WHERE existing.video_path = v.video_path)`,
+			sourceVisibilityExpression, sourceHLSExpression, sourceProcessingProgressExpression, sourceProcessingStageExpression,
+			sourceVideoExpressions["source_width"], sourceVideoExpressions["source_height"], sourceVideoExpressions["source_bitrate"],
+			sourceVideoExpressions["video_codec"], sourceVideoExpressions["audio_codec"], sourceVideoExpressions["processing_error"],
+			sourceVideoExpressions["processed_at"])},
 		{"subtitles", `INSERT OR IGNORE INTO video_subtitles(video_id, language, label, subtitle_path, is_default, created_at)
 SELECT v.id, s.language, s.label, s.subtitle_path, s.is_default, s.created_at
 FROM source_db.video_subtitles s
@@ -377,6 +739,14 @@ JOIN source_db.videos sv ON sv.id = j.video_id JOIN videos v ON v.video_path = s
 	if !sourceHasFollows {
 		for index, statement := range statements {
 			if statement.name == "follows" {
+				statements = append(statements[:index], statements[index+1:]...)
+				break
+			}
+		}
+	}
+	if !sourceHasTranscodingJobs {
+		for index, statement := range statements {
+			if statement.name == "media_jobs" {
 				statements = append(statements[:index], statements[index+1:]...)
 				break
 			}

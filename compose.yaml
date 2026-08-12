@@ -12,7 +12,7 @@ services:
       MEDIA_DIR: /app/media
       SESSION_TTL: 168h
       MAX_UPLOAD_BYTES: 536870912
-      COOKIE_SECURE: "false"
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
       FFMPEG_PATH: ffmpeg
       FFPROBE_PATH: ffprobe
       MEDIA_WORKER_ENABLED: "true"
@@ -42,8 +42,13 @@ services:
       backend:
         condition: service_healthy
     ports:
-      - "8088:80"
+      - "127.0.0.1:8088:80"
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/index.html && wget -q -O /dev/null http://127.0.0.1/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
 
 volumes:
   gvideo-data:

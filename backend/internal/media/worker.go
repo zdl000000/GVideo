@@ -91,6 +91,9 @@ func (w *Worker) processOne(ctx context.Context) (bool, error) {
 		w.logger.Warn("media job failed", "job_id", job.ID, "video_id", job.VideoID, "attempt", job.Attempts, "retry", retryAt != nil, "error", err)
 		return true, nil
 	}
+	if err := w.repo.UpdateTranscodingProgress(ctx, job.VideoID, 35, "transcoding"); err != nil {
+		return true, err
+	}
 	hlsMasterPath, err := w.transcoder.Transcode(ctx, inputPath, job.VideoID, metadata)
 	if err != nil {
 		if ctx.Err() != nil {
@@ -106,6 +109,9 @@ func (w *Worker) processOne(ctx context.Context) (bool, error) {
 		}
 		w.logger.Warn("HLS transcode failed", "job_id", job.ID, "video_id", job.VideoID, "attempt", job.Attempts, "retry", retryAt != nil, "error", err)
 		return true, nil
+	}
+	if err := w.repo.UpdateTranscodingProgress(ctx, job.VideoID, 90, "finalizing"); err != nil {
+		return true, err
 	}
 	output := domain.MediaOutput{Metadata: metadata, HLSMasterPath: hlsMasterPath}
 	if err := w.repo.CompleteTranscodingJob(ctx, job.ID, job.VideoID, output); err != nil {

@@ -79,6 +79,30 @@ func main() {
 }
 
 func runDataCommand(ctx context.Context, cfg config.Config, args []string) error {
+	if args[0] == "data-verify" || args[0] == "data-verify-media" {
+		db, err := platform.OpenDatabaseReadOnly(cfg.DatabasePath)
+		if err != nil {
+			return err
+		}
+		defer db.Close()
+		if err := platform.VerifyDatabase(ctx, db); err != nil {
+			return err
+		}
+		if args[0] == "data-verify-media" {
+			if err := platform.VerifyMediaFiles(ctx, db, cfg.MediaDir); err != nil {
+				return err
+			}
+		}
+		stats, err := platform.ReadDatabaseStats(ctx, db)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("integrity=ok\nmedia=%s\nusers=%d\nsessions=%d\nvideos=%d\nsubtitles=%d\ncomments=%d\nlikes=%d\nfavorites=%d\nfollows=%d\nmedia_jobs=%d\n",
+			map[bool]string{true: "ok", false: "not-checked"}[args[0] == "data-verify-media"],
+			stats.Users, stats.Sessions, stats.Videos, stats.Subtitles, stats.Comments, stats.Likes, stats.Favorites, stats.Follows, stats.MediaJobs)
+		return nil
+	}
+
 	db, err := platform.OpenDatabase(cfg.DatabasePath)
 	if err != nil {
 		return err
@@ -91,8 +115,8 @@ func runDataCommand(ctx context.Context, cfg config.Config, args []string) error
 		if err != nil {
 			return err
 		}
-		fmt.Printf("database=%s\nusers=%d\nsessions=%d\nvideos=%d\ncomments=%d\nlikes=%d\nfavorites=%d\nfollows=%d\nmedia_jobs=%d\n",
-			cfg.DatabasePath, stats.Users, stats.Sessions, stats.Videos, stats.Comments, stats.Likes, stats.Favorites, stats.Follows, stats.MediaJobs)
+		fmt.Printf("database=%s\nusers=%d\nsessions=%d\nvideos=%d\nsubtitles=%d\ncomments=%d\nlikes=%d\nfavorites=%d\nfollows=%d\nmedia_jobs=%d\n",
+			cfg.DatabasePath, stats.Users, stats.Sessions, stats.Videos, stats.Subtitles, stats.Comments, stats.Likes, stats.Favorites, stats.Follows, stats.MediaJobs)
 		return nil
 	case "data-backup":
 		if len(args) != 2 {
@@ -115,6 +139,6 @@ func runDataCommand(ctx context.Context, cfg config.Config, args []string) error
 			stats.Users, stats.RenamedUsers, stats.Sessions, stats.Videos, stats.Comments, stats.Likes, stats.Favorites, stats.Follows, stats.MediaJobs)
 		return nil
 	default:
-		return fmt.Errorf("unknown command %q; use data-status, data-backup, or data-merge", args[0])
+		return fmt.Errorf("unknown command %q; use data-status, data-backup, data-verify, data-verify-media, or data-merge", args[0])
 	}
 }

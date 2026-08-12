@@ -1,8 +1,10 @@
 # GVideo
 
-GVideo 是一个面向视频创作者与观众的社区型全栈项目，交互参考主流视频社区，但不复制 B 站品牌、代码或架构。当前版本已打通注册登录、发现与播放、投稿管理、互动评论、作者空间、关注关系和关注动态这一条完整社区流程。
+GVideo 是一个面向视频创作者与观众的社区型全栈项目，交互参考主流视频社区，但不复制 B 站品牌、代码或架构。当前基线已打通注册登录、发现与播放、投稿管理、互动评论、作者空间、关注关系和关注动态这一条完整社区流程。
 
 参考项目 [My-TuDo/B-B](https://github.com/My-TuDo/B-B) 只用于理解常见视频社区功能。GVideo 当前采用更适合学习和单机部署的模块化单体，暂不引入微服务、RabbitMQ、Redis、MinIO 或复杂推荐系统。
+
+当前工作区已接通用户资料与头像、创作者工作台、投稿可见性、媒体鉴权、可观察的转码进度和字幕轨道管理，并提供可选 HTTPS 网关、SQLite 与媒体卷备份清单及隔离恢复演练。后端路由、领域类型、SQLite 字段与兼容迁移已经加入，前端已提供工作台、统一头像展示、资料编辑、可见性控件、处理进度和字幕管理界面。
 
 ## 功能范围
 
@@ -18,7 +20,13 @@ GVideo 是一个面向视频创作者与观众的社区型全栈项目，交互�
 - 首页、最新、热门和我的投稿均支持服务端分页，页码保存在 URL 中
 - 作者空间 `/users/:id` 展示资料、加入时间、投稿/粉丝/关注统计和服务端分页投稿；本人空间进入投稿管理，其他用户可关注或取消关注
 - 登录用户可通过 `/following` 按发布时间浏览所关注作者的最新投稿，未登录访问会先跳转登录并在成功后返回
-- 我的投稿支持编辑标题、简介、分区和封面，支持删除投稿及相关媒体文件
+- 后端支持登录用户编辑用户名、最多 300 字简介和 JPEG/PNG/WebP 头像；头像路径会同步出现在用户、作者、视频和评论响应中
+- 创作者工作台 `/creator` 使用本人聚合统计接口展示投稿、粉丝、播放、互动、可见性分布、处理中数量和最近投稿
+- 投稿支持 `public`、`unlisted`、`private` 三种可见性；公共列表只显示公开投稿，本人投稿列表显示全部投稿
+- 我的投稿支持编辑标题、简介、分区、可见性和封面，支持删除投稿及相关媒体文件
+- 播放页、创作者工作台和投稿管理页展示后台转码阶段与百分比；失败响应只返回安全、可操作的分类文案
+- 视频作者可在播放页上传、设为默认或删除字幕轨道；删除默认轨道后自动选择剩余最早轨道
+- `/media/*` 在返回原视频、封面、字幕和 HLS 文件前按所属视频鉴权；头像公开，私密视频媒体仅作者可读
 - 浅色/深色主题切换，并记住用户选择
 - 结构化日志、请求 ID、统一 JSON 错误响应、CSRF 防护
 - Go 单元测试、HTTP 核心流程测试、TypeScript 检查和生产构建
@@ -80,6 +88,10 @@ frontend/
   src/App.tsx             页面、路由和交互组件
   src/styles.css          响应式视觉系统
 docs/project-standards.md 当前项目专项开发规范
+deploy/nginx/             HTTPS 网关配置
+scripts/                  检查、数据状态、备份与隔离恢复演练
+compose.yaml              本机 HTTP 部署
+compose.https.yaml        可选生产 HTTPS overlay
 scripts/                  Windows 开发与检查脚本
 ```
 
@@ -94,6 +106,7 @@ scripts/                  Windows 开发与检查脚本
 | `/users/:id` | 作者资料、统计、关注操作和分页投稿 |
 | `/following` | 登录用户的关注动态，未登录时跳转 `/auth?next=/following` |
 | `/upload`、`/me/videos` | 发布视频和管理本人投稿 |
+| `/creator` | 登录用户的创作者工作台，展示聚合表现、可见性分布、处理状态和最近投稿 |
 | `/auth` | 独立布局的登录与注册页，支持 `next` 回跳 |
 
 ### 作者与关注 API
@@ -106,6 +119,56 @@ scripts/                  Windows 开发与检查脚本
 | `GET /api/v1/me/following/videos` | 仅返回当前用户已关注作者的投稿，按最新发布排序并分页 |
 
 SQLite 使用 `user_follows(follower_id, followed_id, created_at)` 保存关系，复合主键保证同一关系唯一，`CHECK` 禁止自关注，两端外键均使用 `ON DELETE CASCADE`。`idx_user_follows_followed` 支持粉丝统计和被关注用户查询；数据库合并会重映射两端用户 ID，旧来源库没有该表时仍可兼容导入。
+
+### 用户资料、创作统计与可见性 API
+
+| 方法与路径 | 说明 |
+| --- | --- |
+| `PATCH /api/v1/me/profile` | 登录并通过 CSRF 校验后更新 `username`、`bio` 和可选 `avatar`；使用 `multipart/form-data` |
+| `GET /api/v1/me/creator/stats` | 返回本人投稿、粉丝、播放、点赞、收藏、评论、三种可见性数量、处理中数量和最近 5 条投稿 |
+| `POST /api/v1/videos` | 上传表单接受 `visibility`；空值兼容为 `public`，其他值必须是三种合法枚举之一 |
+| `PATCH /api/v1/videos/{videoID}` | 作者可同时更新标题、简介、分区、`visibility` 和可选封面 |
+| `GET /api/v1/me/videos` | 登录用户查看本人全部投稿，包括 `unlisted` 和 `private` |
+| `GET /api/v1/videos/{videoID}` | `public` 与 `unlisted` 可通过直链读取；`private` 仅作者可读，其他访问统一返回 404 |
+| `GET /media/*` | 头像路径公开；其他媒体按所属视频可见性和当前 viewer 鉴权，并由 `http.ServeFile` 保留 Range/206 能力 |
+
+资料更新沿用注册时的用户名规则：3 到 24 位中文、字母、数字或下划线，简介最多 300 个 Unicode 字符。头像和封面共用真实文件头校验，只接受 JPEG、PNG、WebP，单文件上限 10 MiB；新头像写入成功但数据库更新失败时会回收新文件，更新成功后才清理旧头像。
+
+SQLite 在 `users` 表增加 `avatar_path TEXT NOT NULL DEFAULT ''`，在 `videos` 表增加 `visibility TEXT NOT NULL DEFAULT 'public'`。新建表使用 `CHECK (visibility IN ('public', 'unlisted', 'private'))`；旧库启动时自动补列，数据库合并会检测来源库是否包含新字段，不存在时分别回退为空头像和 `public`，从而保持旧库导入兼容与幂等性。
+
+可见性规则如下：
+
+| 场景 | `public` | `unlisted` | `private` |
+| --- | --- | --- | --- |
+| 首页、最新、热门、搜索 | 显示 | 不显示 | 不显示 |
+| 作者空间、关注动态 | 显示 | 不显示 | 不显示 |
+| 本人投稿、创作者工作台 | 显示 | 显示 | 显示 |
+| 视频详情直链 | 可访问 | 可访问 | 仅作者可访问 |
+| 原视频、封面、字幕、HLS | 可访问 | 可访问 | 仅作者可访问 |
+
+### 媒体处理进度与字幕 API
+
+`Video` 响应增加 `processing_progress` 和 `processing_stage`。阶段按持久化任务推进：
+
+| 状态 | 进度 | 阶段 |
+| --- | ---: | --- |
+| 新上传、自动重试、手动重试 | 0 | `queued` |
+| worker 领取任务 | 10 | `probing` |
+| FFprobe 完成 | 35 | `transcoding` |
+| FFmpeg 完成 | 90 | `finalizing` |
+| 任务完成 | 100 | `ready` |
+| 最终失败 | 保留最后进度 | `failed` |
+
+SQLite 使用 `videos.processing_progress INTEGER NOT NULL DEFAULT 100` 和 `videos.processing_stage TEXT NOT NULL DEFAULT 'ready'`。旧库启动迁移和数据库合并在字段缺失时根据 `processing_status` 回退，且不会覆盖已迁移库中的现有进度。
+
+原始 FFprobe/FFmpeg 错误只保存在数据库和结构化日志中。API 的 `processing_error` 由服务层分类为源文件不可用、处理超时、格式或编码不支持、存储不足或通用处理失败，不返回本机路径、命令输出和内部日志。
+
+| 方法与路径 | 说明 |
+| --- | --- |
+| `PATCH /api/v1/videos/{videoID}/subtitles/{subtitleID}/default` | 视频作者将指定轨道设为唯一默认轨道，返回最新完整轨道列表 |
+| `DELETE /api/v1/videos/{videoID}/subtitles/{subtitleID}` | 视频作者删除轨道，返回最新完整轨道列表 |
+
+两个接口都要求登录与 CSRF 校验。删除默认轨道时，剩余轨道中 ID 最小的一条自动成为默认；删除最后一条后返回空数组。字幕数据库事务成功后才清理媒体文件。
 
 ## 环境准备
 
@@ -144,6 +207,10 @@ go mod download
 | `SESSION_TTL` | `168h` | 登录有效期 |
 | `MAX_UPLOAD_BYTES` | `536870912` | 单个视频最大 512 MiB |
 | `COOKIE_SECURE` | `false` | HTTPS 生产环境必须设为 `true` |
+| `HTTPS_HTTP_PORT` | `80` | HTTPS overlay 的 HTTP 重定向端口 |
+| `HTTPS_PORT` | `443` | HTTPS overlay 的 TLS 端口 |
+| `TLS_CERT_FILE` | 无 | 宿主机证书链绝对路径，仅供 HTTPS overlay 只读挂载 |
+| `TLS_KEY_FILE` | 无 | 宿主机私钥绝对路径，仅供 HTTPS overlay 只读挂载 |
 | `FFMPEG_PATH` | `ffmpeg` | FFmpeg 命令或绝对路径 |
 | `FFPROBE_PATH` | `ffprobe` | FFprobe 命令或绝对路径 |
 | `MEDIA_WORKER_ENABLED` | `true` | 是否启动进程内媒体任务 worker |
@@ -193,19 +260,37 @@ npm run dev
 
 ```powershell
 cd backend
-gofmt -w ./cmd ./internal
-go test ./...
+$env:GOCACHE='..\tmp\go-build'
+go fmt ./...
+go test ./... -count=1
 go vet ./...
 
 cd ..\frontend
 npm run typecheck
 npm run build
-npm audit --omit=dev --audit-level=high --registry=https://registry.npmjs.org/
+
+cd ..
+git diff --check
 ```
 
 HTTP 流程测试使用临时数据库和媒体目录，覆盖注册、上传、分页、媒体读取、点赞、评论、投稿编辑权限和删除，不会写入开发数据。服务层测试还覆盖失败任务重新入队、旧 HLS 清理，以及转码中的投稿禁止删除。
 
 关注功能测试覆盖关注切换、粉丝与关注统计、登录 viewer 的 `followed` 状态、关注动态过滤、自关注禁止、目标用户不存在、401、CSRF 403、作者资料与投稿分页、删除用户后的级联清理、`DatabaseStats.Follows`，以及数据库合并对 `user_follows` 的兼容与幂等性。
+
+用户资料、创作者统计、可见性与媒体鉴权测试覆盖资料更新与用户名冲突、非法头像、头像替换和失败回收、无投稿创作者统计、三种可见性的列表与详情矩阵、关注动态不泄露非公开投稿、私密视频互动权限、原视频/封面/字幕/HLS 鉴权、Range/206、HTTP 401/403/multipart，以及旧库升级和数据库合并对 `avatar_path`、`visibility` 的兼容与幂等性。
+
+媒体处理与字幕管理测试覆盖任务领取、阶段推进、自动和手动重试、最终失败、完成状态、安全失败文案、旧库进度回填、数据库合并兼容与幂等、默认轨道唯一性、删除默认轨道回退、删除最后轨道、文件清理、作者权限、用户不存在、HTTP 401 和 CSRF 403。
+
+2026-08-10 已真实执行并通过以下阶段验收：
+
+- 后端在项目 `tmp/go-build` 缓存下通过 `go test ./... -count=1` 与 `go vet ./...`
+- 前端通过 `npm run typecheck` 与 `npm run build`；Vite 仅提示单个 chunk 体积较大，不影响构建
+- 根目录通过 `git diff --check`
+- `docker compose -f compose.yaml up --build -d` 构建并启动成功，`8080/healthz` 与 `8088/healthz` 均返回 `200`
+- 桌面与 `390 × 844` 移动视口完成只读浏览器验收，覆盖首页、播放页、作者字幕管理入口、创作者工作台、投稿管理、独立登录布局、未登录关注动态回跳、深浅主题、焦点样式和横向溢出检查；控制台无警告或错误
+- 匿名验收使用同一服务的 `localhost:8088` 隔离现有 `127.0.0.1` 登录 Cookie，`/following` 准确跳转到 `/auth?next=%2Ffollowing`；全程未填写凭证、提交表单、创建账号、上传内容或修改业务数据
+
+以上浏览器结果在 2026-08-12 以最新镜像重新验收：桌面首页、作者空间、播放页作者/评论/相关推荐链接、移动 `390 × 844` 横向溢出、关注动态登录态页面、独立登录布局、深浅主题、移动菜单语义、投稿编辑弹窗焦点与 Escape 关闭均完成只读检查；控制台无错误或警告。匿名验收使用同一服务的 `localhost:8088` 隔离现有 `127.0.0.1` 登录 Cookie，并确认 `/following` 跳转 `/auth?next=%2Ffollowing`。验收过程未填写凭证、提交表单、创建账号、上传内容或修改业务数据。
 
 临时数据库只存在于 `go test` 自动化测试中，测试结束即删除。浏览器访问 `5173` 或 `8088` 时不使用临时数据库。
 
@@ -244,11 +329,35 @@ docker compose logs --tail 100 backend frontend
 .\scripts\data-status.ps1
 ```
 
-创建 SQLite 一致性备份；备份默认写入被 Git 忽略的 `backups/`：
+创建数据库与媒体备份包；默认在被 Git 忽略的 `backups/` 中生成不可覆盖的时间戳目录，包含 `database.db`、`media.tar.gz` 和带 SHA-256、大小、记录统计、媒体文件数的 `manifest.json`：
 
 ```powershell
 .\scripts\backup-data.ps1
 ```
+
+备份数据库使用 SQLite `VACUUM INTO`，可正确处理 WAL 模式；媒体卷通过独立容器只读挂载后归档，不停止现有服务，也不写入媒体卷。由于数据库快照与媒体归档不是同一个跨资源事务，这是一份可校验的在线近一致备份，建议在没有上传、删除、资料图片修改和转码发布的低写入窗口执行。需要严格恢复点时，应先在网关层进入维护窗口并等待当前媒体任务完成。
+
+在不挂载真实命名卷、不发布端口、不写回现有数据的情况下验证最新备份，或指定一个备份目录：
+
+```powershell
+.\scripts\verify-backup.ps1
+.\scripts\verify-backup.ps1 -Backup .\backups\gvideo-20260810-120000-000
+```
+
+恢复演练会校验清单、大小、SHA-256、归档路径与条目类型；以只读方式执行 SQLite `integrity_check` 和 `foreign_key_check`；在 `tmp/restore-verification-*` 隔离目录解包媒体；确认头像、原视频大小、封面、字幕以及 HLS 主清单、变体和切片都存在；最后在数据库副本上执行当前版本迁移和统计比对。脚本结束后只删除自己创建的 `tmp` 验证目录，不删除备份包。
+
+### HTTPS 部署
+
+默认 Compose 仍用于本机 HTTP 开发，后端和前端分别只绑定 `127.0.0.1:8080`、`127.0.0.1:8088`。公网部署使用 HTTPS overlay；真实证书和私钥必须位于仓库外或被 `.gitignore` 排除，并通过只读挂载注入：
+
+```powershell
+$env:TLS_CERT_FILE = "C:\secure\gvideo\fullchain.pem"
+$env:TLS_KEY_FILE = "C:\secure\gvideo\privkey.pem"
+docker compose -f compose.yaml -f compose.https.yaml config
+docker compose -f compose.yaml -f compose.https.yaml up --build -d
+```
+
+HTTPS overlay 增加 `gateway` 服务，HTTP 使用 `308` 跳转 HTTPS，TLS 入口继续同源代理前端、API 和媒体请求，并强制后端 `COOKIE_SECURE=true`。启动前应检查渲染后的 Compose 配置中只有网关端口面向公网，证书路径正确，backend 环境为 `COOKIE_SECURE: "true"`。自定义监听端口可设置 `HTTPS_HTTP_PORT` 与 `HTTPS_PORT`；网关启动脚本会由 `HTTPS_PORT` 自动派生重定向端口后缀，避免端口配置不一致。网关 healthcheck 同时检查 HTTP 健康端点和 HTTPS TLS 响应；正式反向代理或负载均衡部署仍应只开放实际 TLS 入口。
 
 访问地址：
 
@@ -263,7 +372,7 @@ docker compose down
 
 不要执行 `docker compose down -v`，其中的 `-v` 会同时删除 SQLite 与媒体命名卷。只有明确需要清空全部业务数据时才应删除卷。
 
-本机已经实际验证镜像构建、容器健康检查、前端路由、API 反向代理，以及注册用户和登录会话在 `docker compose down`、`docker compose up -d` 后仍然存在。正式公网部署应在 Nginx 前增加 HTTPS 入口，并把 `COOKIE_SECURE` 改为 `true`。
+本机已经实际验证镜像构建、容器健康检查、前端路由、API 反向代理，以及注册用户和登录会话在 `docker compose down`、`docker compose up -d` 后仍然存在。
 
 2026-08-09 已将早期本机开发库安全合并到 Docker 数据卷，并同步本机媒体文件。合并后实际包含 12 个用户、3 个视频、6 条评论、5 个点赞和 1 个收藏；完整执行 `docker compose down` 与 `docker compose up -d` 后数量保持一致，三个视频的 Range 请求均返回 `206 Partial Content`。迁移前的本机库和 Docker 库备份保存在本机 `backups/`，不会进入 Git。
 
@@ -290,7 +399,7 @@ Docker 环境中已使用 FFmpeg 生成并通过公开 API 上传一条 3 秒 H.
 
 **上传后长期显示“等待媒体处理”或“HLS 处理失败”**
 
-确认 `FFMPEG_PATH` 和 `FFPROBE_PATH` 可执行，并检查后端结构化日志中的 `job_id` 与 `video_id`。任务最多自动尝试 3 次；探测或转码失败不会删除原始视频，播放器仍可使用原始文件。作者可在“我的投稿”中点击“重试”，任务会清空旧错误和不完整的 HLS 目录后重新进入队列。
+确认 `FFMPEG_PATH` 和 `FFPROBE_PATH` 可执行，并检查后端结构化日志中的 `job_id` 与 `video_id`。前端会显示排队、探测、转码和收尾进度；任务最多自动尝试 3 次。探测或转码失败不会删除原始视频，播放器仍可使用原始文件；对外只展示安全分类后的失败建议。作者可在“我的投稿”中点击“重试”，任务会清空旧错误和不完整的 HLS 目录后重新进入队列。
 
 **状态修改提示页面凭证过期**
 
@@ -312,14 +421,21 @@ Docker 环境中已使用 FFmpeg 生成并通过公开 API 上传一条 3 秒 H.
 - 上传校验读取真实文件头，不相信文件扩展名和浏览器声明的 MIME。
 - 上传请求只负责可靠保存文件并原子创建媒体任务；FFprobe 在可取消、可恢复的单 worker 中执行，避免大文件探测占住上传请求。SQLite 当前只启一个 worker，迁移 PostgreSQL 后再评估并行领取。
 - HLS 只生成不超过源视频尺寸的档位。FFmpeg 先写入临时目录，所有档位成功后才发布到稳定路径；失败时清理临时文件，并保留原始 MP4 作为播放回退。
+- 转码进度与任务状态一起持久化，而不是依赖进程内状态；worker 只通过仓储推进阶段，服务层统一隐藏原始媒体工具错误。
 - 浏览器 HLS 逻辑使用成熟的 `hls.js`，React Effect 销毁播放器实例；清晰度默认由带宽自适应算法选择，也可手动锁定可用档位。
 - 首页采用“主推荐封面 + 次推荐网格”的视频社区信息结构，内容全部来自真实上传，不复制参考站点的品牌与视觉皮肤。
 - 首页、最新和热门发现使用独立路由与页面结构。最新页按发布时间倒序排列；热门页按“播放量 + 点赞数 × 4”综合排序。旧地址 `/?sort=latest` 和 `/?sort=popular` 会自动跳转到对应页面并保留其他筛选参数。
 - 视频列表使用服务端分页，响应统一包含 `items`、`page`、`page_size`、`total` 和 `has_next`；筛选条件变化时回到第一页，热门排名会包含分页偏移。
 - 播放页桌面端采用“主内容 + 相关推荐”双栏布局，评论区位于视频信息下方；窄屏下按播放器、视频信息、评论、相关推荐的顺序单栏展示。
 - 浏览器字幕统一使用 WebVTT。上传入口接受 UTF-8 编码的 `.vtt` 和 `.srt`，后端会校验文件并将 SRT 转换为 VTT；字幕元数据保存在 SQLite 的 `video_subtitles` 表，文件保存在 `MEDIA_DIR/subtitles/`，不会写入前端代码或浏览器本地存储。
-- 字幕文件最大 2 MB。上传视频时可以附带首条字幕，视频作者也可以在播放页补传；同一视频的同一语言目前只保留一条轨道。播放器控制栏提供字幕轨道选择和关闭选项，无字幕时按钮仍可点击查看状态和上传提示。
+- 字幕文件最大 2 MB。上传视频时可以附带首条字幕，视频作者也可以在播放页补传、切换默认轨道和删除轨道；同一视频的同一语言只保留一条轨道，同一视频最多一个默认轨道。删除默认轨道时由数据库事务选择回退轨道，提交成功后再清理字幕文件。
 - 投稿删除先在数据库事务中删除视频记录并级联清理字幕、互动、评论和转码任务，再清理原视频、封面、字幕文件及 `hls/<video-id>/`。转码中的视频禁止删除，避免后台 worker 与文件清理并发冲突。
+- 用户头像与视频媒体使用同一媒体根目录，但权限边界不同：`avatars/*` 可公开读取，视频原文件、封面、字幕和 HLS 先映射到所属视频，再按 `visibility` 和当前 viewer 决定是否返回。
+- 非公开投稿不能只靠前端隐藏。公共列表统一由 `VideoFilter.IncludeNonPublic=false` 增加 `v.visibility = 'public'` 条件；只有本人投稿和创作者统计显式请求 `IncludeNonPublic=true`。
+- `private` 对非作者统一表现为不存在，视频详情、评论读取与创建、点赞、收藏以及媒体请求都复用视频可访问性检查，避免通过关联接口或静态文件路径泄露存在性。
+- `unlisted` 保留直链分享能力，但不进入首页、最新、热门、搜索、作者空间和关注动态。
+- 默认 Compose 只暴露本机 HTTP 调试端口；可选 HTTPS overlay 单独承担公网 TLS、HTTP 重定向和 Secure Cookie，不把真实证书打入镜像或提交到仓库。
+- SQLite 与媒体位于两个一致性边界。在线备份对数据库使用一致性快照，对媒体使用只读归档并生成可验证清单；严格恢复点需要维护窗口，文档不得把不停服备份描述为跨资源原子快照。
 
 ## 视频管理接口
 
@@ -328,12 +444,16 @@ Docker 环境中已使用 FFmpeg 生成并通过公开 API 上传一条 3 秒 H.
 ```text
 GET    /api/v1/videos?page=1&page_size=24
 GET    /api/v1/me/videos?page=1&page_size=12
+GET    /api/v1/me/creator/stats
+PATCH  /api/v1/me/profile
 PATCH  /api/v1/videos/{videoID}
 DELETE /api/v1/videos/{videoID}
 POST   /api/v1/videos/{videoID}/retry
+PATCH  /api/v1/videos/{videoID}/subtitles/{subtitleID}/default
+DELETE /api/v1/videos/{videoID}/subtitles/{subtitleID}
 ```
 
-编辑接口使用 `multipart/form-data`，支持 `title`、`description`、`category` 和可选的 `cover`。编辑、删除和重新转码都要求登录、CSRF token，并校验当前用户是视频作者。只有 `failed` 状态可重新转码；`processing` 状态不可删除。
+资料与投稿编辑接口使用 `multipart/form-data`。资料更新支持 `username`、`bio` 和可选 `avatar`；投稿编辑支持 `title`、`description`、`category`、`visibility` 和可选 `cover`。状态变更要求登录、CSRF token，并在投稿和字幕操作中校验当前用户是视频作者。只有 `failed` 状态可重新转码；`processing` 状态不可删除。
 
 ## 推荐学习顺序
 
@@ -341,10 +461,17 @@ POST   /api/v1/videos/{videoID}/retry
 2. 跟踪注册请求：`httpapi -> service -> repository -> SQLite`。
 3. 阅读上传流程，理解 multipart、文件头检测、原子写入和 FFmpeg 子进程超时。
 4. 阅读 `frontend/src/api.ts`，理解 cookie、CSRF 和统一错误处理。
-5. 阅读 `CreatorProfile`、`user_follows` 和 `VideoFilter.FollowingUserID`，理解关注关系如何贯穿 domain、repository、service 与 HTTP 层。
-6. 对比作者空间、关注动态、首页、热门发现、播放页和上传页，观察受保护路由、`next` 回跳、URL 分页、局部状态和异步状态如何组织。
-7. 最后阅读数据库合并和关注测试，理解兼容旧表结构、关系重映射、级联删除与幂等导入。
-8. 阅读我的投稿管理页，跟踪编辑、删除和重新转码如何经过前端、HTTP、服务、仓储和媒体目录。
+5. 阅读 `User.AvatarURL`、`UpdateProfile` 和 `users.avatar_path`，跟踪 multipart 头像从文件头校验、原子保存、数据库更新到旧文件清理的完整生命周期。
+6. 阅读 `CreatorProfile`、`user_follows` 和 `VideoFilter.FollowingUserID`，理解关注关系如何贯穿 domain、repository、service 与 HTTP 层。
+7. 阅读 `Video.Visibility`、`VideoFilter.IncludeNonPublic` 和 `VideoByID`，对照公开列表、本人投稿与直链详情的三种可见性规则。
+8. 阅读 `AuthorizeMedia`、`MediaAccessByPath` 和 `/media/*` Handler，理解原视频、封面、字幕与 HLS 如何复用视频权限并保留 Range 请求。
+9. 阅读 `CreatorStats` 和前端 `/creator` 数据类型，理解聚合统计、可见性分布、处理中数量和最近投稿如何形成工作台。
+10. 阅读 `ClaimTranscodingJob`、`UpdateTranscodingProgress`、worker 和 `publicVideo`，理解进度持久化、阶段推进、重试和安全失败文案如何跨层协作。
+11. 阅读 `SetDefaultSubtitle`、`DeleteSubtitle` 与前端 `SubtitleManager`，理解事务内唯一默认、删除回退、文件清理和播放器状态同步。
+12. 对比作者空间、关注动态、创作者工作台、首页、播放页、上传页和投稿管理页，观察受保护路由、`next` 回跳、URL 分页、局部状态和异步状态如何组织。
+13. 阅读 `compose.https.yaml`、`deploy/nginx/https.conf.template` 和前端 Nginx 配置，理解同源代理、可信转发协议、Secure Cookie 与证书只读挂载。
+14. 阅读 `backup-data.ps1`、`verify-backup.ps1`、`data-verify` 与 `VerifyMediaFiles`，理解 WAL 一致性快照、近一致媒体归档、清单校验和隔离恢复。
+15. 最后阅读数据库升级、合并和相关测试，理解缺失新字段时的默认值、关系重映射、级联删除与幂等导入。
 
 字幕相关后端测试可在 `backend` 目录运行：
 
@@ -358,9 +485,8 @@ go test ./... -count=1
 
 建议按真实瓶颈渐进升级：
 
-1. 增加用户资料、视频可见性和更细的创作数据统计。
-2. 增加可观察的转码进度、字幕删除与默认轨道切换。
-3. 为部署环境增加 HTTPS 入口、备份策略，并定期验证 SQLite 与媒体命名卷恢复流程。
-4. 多实例写入成为需求后迁移 PostgreSQL；媒体容量或多机共享成为需求后迁移 MinIO/S3。
-5. 热门榜与频繁读取造成数据库压力后再评估 Redis。
-6. 只有上传转码需要独立扩缩容和故障隔离时，先拆出媒体处理 worker；不要一次性把所有模块拆成微服务。
+1. 增加通知中心和更细的创作数据趋势，但继续以真实使用需求决定统计维度。
+2. 为严格恢复点增加应用级维护/备份屏障，并把备份复制到异机或异盘的加密存储。
+3. 多实例写入成为需求后迁移 PostgreSQL；媒体容量或多机共享成为需求后迁移 MinIO/S3。
+4. 热门榜与频繁读取造成数据库压力后再评估 Redis。
+5. 只有上传转码需要独立扩缩容和故障隔离时，先拆出媒体处理 worker；不要一次性把所有模块拆成微服务。

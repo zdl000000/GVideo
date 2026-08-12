@@ -50,6 +50,7 @@ type UploadInput struct {
 	Title            string
 	Description      string
 	Category         string
+	Visibility       string
 	Video            *multipart.FileHeader
 	Cover            *multipart.FileHeader
 	Subtitle         *multipart.FileHeader
@@ -63,7 +64,15 @@ type UpdateVideoInput struct {
 	Title       string
 	Description string
 	Category    string
+	Visibility  string
 	Cover       *multipart.FileHeader
+}
+
+type UpdateProfileInput struct {
+	UserID   int64
+	Username string
+	Bio      string
+	Avatar   *multipart.FileHeader
 }
 
 func New(repo *repository.Repository, cfg config.Config, logger *slog.Logger) *Service {
@@ -168,6 +177,69 @@ func (s *Service) CreatorProfile(ctx context.Context, userID, viewerID int64) (d
 	return s.repo.CreatorProfile(ctx, userID, viewerID)
 }
 
+func (s *Service) UpdateProfile(ctx context.Context, input UpdateProfileInput) (domain.User, error) {
+	input.Username = strings.TrimSpace(input.Username)
+	input.Bio = strings.TrimSpace(input.Bio)
+	if input.UserID <= 0 || !usernamePattern.MatchString(input.Username) || len([]rune(input.Bio)) > 300 {
+		return domain.User{}, domain.ErrInvalidInput
+	}
+	current, err := s.repo.UserByID(ctx, input.UserID)
+	if err != nil {
+		return domain.User{}, err
+	}
+
+	var avatarPath *string
+	var savedPath string
+	if input.Avatar != nil && input.Avatar.Size > 0 {
+		ext, err := inspectImage(input.Avatar)
+		if err != nil {
+			return domain.User{}, err
+		}
+		token, err := randomToken(16)
+		if err != nil {
+			return domain.User{}, err
+		}
+		relative := filepath.Join("avatars", token+ext)
+		savedPath = filepath.Join(s.cfg.MediaDir, relative)
+		if err := os.MkdirAll(filepath.Dir(savedPath), 0o755); err != nil {
+			return domain.User{}, fmt.Errorf("create avatar directory: %w", err)
+		}
+		if err := saveMultipart(input.Avatar, savedPath); err != nil {
+			return domain.User{}, err
+		}
+		avatarPath = &relative
+	}
+
+	updated, err := s.repo.UpdateProfile(ctx, input.UserID, input.Username, input.Bio, avatarPath)
+	if err != nil {
+		if savedPath != "" {
+			_ = os.Remove(savedPath)
+		}
+		return domain.User{}, err
+	}
+	if avatarPath != nil && current.AvatarURL != "" {
+		s.removeMediaPath(strings.TrimPrefix(current.AvatarURL, "/media/"), false)
+	}
+	return updated, nil
+}
+
+func (s *Service) CreatorStats(ctx context.Context, userID int64) (domain.CreatorStats, error) {
+	if userID <= 0 {
+		return domain.CreatorStats{}, domain.ErrInvalidInput
+	}
+	if _, err := s.repo.UserByID(ctx, userID); err != nil {
+		return domain.CreatorStats{}, err
+	}
+	stats, err := s.repo.CreatorStats(ctx, userID)
+	if err != nil {
+		return domain.CreatorStats{}, err
+	}
+	for index := range stats.RecentVideos {
+		stats.RecentVideos[index] = publicVideo(stats.RecentVideos[index])
+	}
+	return stats, nil
+}
+
 func (s *Service) ToggleFollow(ctx context.Context, followerID, followedID int64) (bool, error) {
 	if followerID <= 0 || followedID <= 0 {
 		return false, domain.ErrInvalidInput
@@ -199,7 +271,8 @@ func (s *Service) Video(ctx context.Context, id, viewerID int64, countView bool)
 func (s *Service) UploadVideo(ctx context.Context, input UploadInput) (domain.Video, error) {
 	input.Title = strings.TrimSpace(input.Title)
 	input.Description = strings.TrimSpace(input.Description)
-	if len([]rune(input.Title)) < 2 || len([]rune(input.Title)) > 80 || len([]rune(input.Description)) > 2000 || !validCategory(input.Category) || input.Video == nil {
+	input.Visibility = normalizeVisibility(input.Visibility)
+	if len([]rune(input.Title)) < 2 || len([]rune(input.Title)) > 80 || len([]rune(input.Description)) > 2000 || !validCategory(input.Category) || input.Visibility == "" || input.Video == nil {
 		return domain.Video{}, domain.ErrInvalidInput
 	}
 	if input.Video.Size <= 0 || input.Video.Size > s.cfg.MaxUploadBytes {
@@ -266,7 +339,8 @@ func (s *Service) UploadVideo(ctx context.Context, input UploadInput) (domain.Vi
 
 	newVideo := domain.NewVideo{
 		UserID: input.UserID, Title: input.Title, Description: input.Description, Category: input.Category,
-		VideoPath: filepath.Join("videos", videoName), CoverPath: relativeCover(coverName), MimeType: mimeType,
+		Visibility: input.Visibility,
+		VideoPath:  filepath.Join("videos", videoName), CoverPath: relativeCover(coverName), MimeType: mimeType,
 		SizeBytes: input.Video.Size,
 	}
 	var video domain.Video
@@ -326,10 +400,39 @@ func (s *Service) AddSubtitle(ctx context.Context, userID, videoID int64, header
 	return track, nil
 }
 
+func (s *Service) SetDefaultSubtitle(ctx context.Context, userID, videoID, subtitleID int64) ([]domain.SubtitleTrack, error) {
+	video, err := s.repo.VideoByID(ctx, videoID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if video.UserID != userID {
+		return nil, domain.ErrForbidden
+	}
+	return s.repo.SetDefaultSubtitle(ctx, videoID, subtitleID)
+}
+
+func (s *Service) DeleteSubtitle(ctx context.Context, userID, videoID, subtitleID int64) ([]domain.SubtitleTrack, error) {
+	video, err := s.repo.VideoByID(ctx, videoID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if video.UserID != userID {
+		return nil, domain.ErrForbidden
+	}
+	subtitlePath, tracks, err := s.repo.DeleteSubtitle(ctx, videoID, subtitleID)
+	if err != nil {
+		return nil, err
+	}
+	s.removeMediaPath(subtitlePath, false)
+	s.removeEmptyMediaParent(filepath.Dir(subtitlePath))
+	return tracks, nil
+}
+
 func (s *Service) UpdateVideo(ctx context.Context, input UpdateVideoInput) (domain.Video, error) {
 	input.Title = strings.TrimSpace(input.Title)
 	input.Description = strings.TrimSpace(input.Description)
-	if len([]rune(input.Title)) < 2 || len([]rune(input.Title)) > 80 || len([]rune(input.Description)) > 2000 || !validCategory(input.Category) {
+	input.Visibility = normalizeVisibility(input.Visibility)
+	if len([]rune(input.Title)) < 2 || len([]rune(input.Title)) > 80 || len([]rune(input.Description)) > 2000 || !validCategory(input.Category) || input.Visibility == "" {
 		return domain.Video{}, domain.ErrInvalidInput
 	}
 	current, err := s.repo.VideoByID(ctx, input.VideoID, input.UserID)
@@ -363,7 +466,7 @@ func (s *Service) UpdateVideo(ctx context.Context, input UpdateVideoInput) (doma
 	}
 
 	updated, err := s.repo.UpdateVideo(ctx, input.VideoID, input.UserID, domain.UpdateVideo{
-		Title: input.Title, Description: input.Description, Category: input.Category, CoverPath: newCoverPath,
+		Title: input.Title, Description: input.Description, Category: input.Category, Visibility: input.Visibility, CoverPath: newCoverPath,
 	})
 	if err != nil {
 		if savedCoverPath != "" {
@@ -432,7 +535,10 @@ func (s *Service) ToggleFavorite(ctx context.Context, userID, videoID int64) (bo
 	return s.repo.ToggleFavorite(ctx, userID, videoID)
 }
 
-func (s *Service) Comments(ctx context.Context, videoID int64) ([]domain.Comment, error) {
+func (s *Service) Comments(ctx context.Context, videoID, viewerID int64) ([]domain.Comment, error) {
+	if _, err := s.repo.VideoByID(ctx, videoID, viewerID); err != nil {
+		return nil, err
+	}
 	return s.repo.ListComments(ctx, videoID)
 }
 
@@ -445,6 +551,21 @@ func (s *Service) CreateComment(ctx context.Context, userID, videoID int64, cont
 		return domain.Comment{}, err
 	}
 	return s.repo.CreateComment(ctx, userID, videoID, content)
+}
+
+func (s *Service) AuthorizeMedia(ctx context.Context, storedPath string, viewerID int64) error {
+	normalized := strings.TrimPrefix(strings.ReplaceAll(storedPath, `\`, "/"), "/")
+	if normalized == "avatars" || strings.HasPrefix(normalized, "avatars/") {
+		return nil
+	}
+	access, err := s.repo.MediaAccessByPath(ctx, normalized)
+	if err != nil {
+		return err
+	}
+	if access.Visibility == "private" && access.UserID != viewerID {
+		return domain.ErrNotFound
+	}
+	return nil
 }
 
 func randomToken(bytes int) (string, error) {
@@ -467,6 +588,19 @@ func validCategory(value string) bool {
 		}
 	}
 	return false
+}
+
+func normalizeVisibility(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "public"
+	}
+	switch value {
+	case "public", "unlisted", "private":
+		return value
+	default:
+		return ""
+	}
 }
 
 func inspectVideo(header *multipart.FileHeader) (string, string, error) {
@@ -685,7 +819,29 @@ func resolveMediaPath(root, storedPath string) (string, error) {
 
 func publicVideo(video domain.Video) domain.Video {
 	if video.ProcessingStatus == "failed" {
-		video.ProcessingMessage = "媒体处理失败，请检查视频编码后重新转码"
+		message := strings.ToLower(video.ProcessingError)
+		switch {
+		case strings.Contains(message, "no such file"),
+			strings.Contains(message, "cannot find"),
+			strings.Contains(message, "path escapes"),
+			strings.Contains(message, "path must be relative"):
+			video.ProcessingMessage = "源视频文件不可用，请重新上传视频"
+		case strings.Contains(message, "timeout"),
+			strings.Contains(message, "deadline"),
+			strings.Contains(message, "canceled"):
+			video.ProcessingMessage = "视频处理超时，请降低分辨率或缩短时长后重试"
+		case strings.Contains(message, "invalid data"),
+			strings.Contains(message, "unsupported"),
+			strings.Contains(message, "codec"),
+			strings.Contains(message, "probe"):
+			video.ProcessingMessage = "无法读取视频，请确认文件未损坏且编码格式受支持"
+		case strings.Contains(message, "no space"),
+			strings.Contains(message, "storage"),
+			strings.Contains(message, "disk"):
+			video.ProcessingMessage = "服务器存储暂时不足，请稍后重试"
+		default:
+			video.ProcessingMessage = "视频处理失败，请检查文件格式后重试"
+		}
 	}
 	return video
 }
