@@ -135,14 +135,16 @@ func TestDatabaseStatsAndBackup(t *testing.T) {
 	if _, err := db.Exec(`
 INSERT INTO users(id, username, password_hash) VALUES (1, 'backup-user', 'hash');
 INSERT INTO users(id, username, password_hash) VALUES (2, 'followed-user', 'hash');
-INSERT INTO user_follows(follower_id, followed_id) VALUES (1, 2);`); err != nil {
+INSERT INTO user_follows(follower_id, followed_id) VALUES (1, 2);
+INSERT INTO notifications(recipient_id, actor_id, actor_username, type, created_at)
+VALUES (2, 1, 'backup-user', 'follow', '2026-08-12 10:00:00');`); err != nil {
 		t.Fatal(err)
 	}
 	stats, err := ReadDatabaseStats(context.Background(), db)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stats.Users != 2 || stats.Videos != 0 || stats.Follows != 1 {
+	if stats.Users != 2 || stats.Videos != 0 || stats.Follows != 1 || stats.Notifications != 1 {
 		t.Fatalf("unexpected stats: %#v", stats)
 	}
 
@@ -159,7 +161,7 @@ INSERT INTO user_follows(follower_id, followed_id) VALUES (1, 2);`); err != nil 
 	}
 	defer backup.Close()
 	backupStats, err := ReadDatabaseStats(context.Background(), backup)
-	if err != nil || backupStats.Users != 2 || backupStats.Follows != 1 {
+	if err != nil || backupStats.Users != 2 || backupStats.Follows != 1 || backupStats.Notifications != 1 {
 		t.Fatalf("backup stats: %#v err=%v", backupStats, err)
 	}
 	if err := VerifyDatabase(context.Background(), backup); err != nil {
@@ -465,5 +467,153 @@ INSERT INTO video_likes(user_id, video_id) VALUES (2, 1);`)
 	}
 	if second.Users != 0 || second.Videos != 0 || second.Comments != 0 || second.Likes != 0 || second.MediaJobs != 0 {
 		t.Fatalf("merge without jobs is not repeatable: %#v", second)
+	}
+}
+
+func TestMergeDatabaseAcceptsLegacySourceWithoutNotifications(t *testing.T) {
+	ctx := context.Background()
+	sourcePath := filepath.Join(t.TempDir(), "legacy-without-notifications.db")
+	source, err := sql.Open("sqlite", sourcePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := source.Exec(`
+CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, bio TEXT NOT NULL DEFAULT '', created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE sessions (token_hash TEXT PRIMARY KEY, user_id INTEGER NOT NULL, csrf_token TEXT NOT NULL, expires_at DATETIME NOT NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE videos (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', category TEXT NOT NULL, video_path TEXT NOT NULL, cover_path TEXT NOT NULL DEFAULT '', mime_type TEXT NOT NULL, duration_seconds REAL NOT NULL DEFAULT 0, size_bytes INTEGER NOT NULL, processing_status TEXT NOT NULL DEFAULT 'ready', views_count INTEGER NOT NULL DEFAULT 0, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE comments (id INTEGER PRIMARY KEY, video_id INTEGER NOT NULL, user_id INTEGER NOT NULL, content TEXT NOT NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE video_likes (user_id INTEGER NOT NULL, video_id INTEGER NOT NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (user_id, video_id));
+CREATE TABLE video_favorites (user_id INTEGER NOT NULL, video_id INTEGER NOT NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (user_id, video_id));
+INSERT INTO users(id, username, password_hash) VALUES (4, 'legacy-without-notifications', 'hash');
+INSERT INTO videos(id, user_id, title, category, video_path, mime_type, size_bytes)
+VALUES (5, 4, 'Legacy video', 'knowledge', 'videos/legacy-without-notifications.mp4', 'video/mp4', 100);`); err != nil {
+		source.Close()
+		t.Fatal(err)
+	}
+	if err := source.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	destination, err := OpenDatabase(filepath.Join(t.TempDir(), "destination.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer destination.Close()
+	merged, err := MergeDatabase(ctx, destination, sourcePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if merged.Users != 1 || merged.Videos != 1 || merged.Notifications != 0 {
+		t.Fatalf("unexpected legacy merge stats: %#v", merged)
+	}
+	stats, err := ReadDatabaseStats(ctx, destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Notifications != 0 {
+		t.Fatalf("notification count after legacy merge = %d, want 0", stats.Notifications)
+	}
+}
+
+func TestMergeDatabaseRemapsNotificationsAndIsRepeatable(t *testing.T) {
+	ctx := context.Background()
+	sourcePath := filepath.Join(t.TempDir(), "notification-source.db")
+	source, err := OpenDatabase(sourcePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := source.Exec(`
+INSERT INTO users(id, username, password_hash, avatar_path) VALUES
+  (10, 'notification-recipient', 'hash', 'avatars/recipient.png'),
+  (20, 'notification-actor', 'hash', 'avatars/actor.png');
+INSERT INTO videos(id, user_id, title, category, video_path, mime_type, size_bytes)
+VALUES (30, 10, 'Notification video', 'knowledge', 'videos/notification.mp4', 'video/mp4', 100);
+INSERT INTO comments(id, video_id, user_id, content, created_at)
+VALUES (40, 30, 20, 'mapped comment', '2026-08-12 10:01:00');
+INSERT INTO notifications(
+  id, recipient_id, actor_id, actor_username, actor_avatar_path, type, video_id,
+  video_title, comment_id, comment_preview, read_at, created_at)
+VALUES (50, 10, 20, 'notification-actor', 'avatars/actor.png', 'comment', 30,
+  'Notification video', 40, 'mapped comment', '2026-08-12 10:03:00', '2026-08-12 10:02:00');`); err != nil {
+		source.Close()
+		t.Fatal(err)
+	}
+	if err := source.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	destination, err := OpenDatabase(filepath.Join(t.TempDir(), "notification-destination.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer destination.Close()
+	if _, err := destination.Exec(`
+INSERT INTO users(id, username, password_hash) VALUES
+  (10, 'destination-user-10', 'hash'),
+  (20, 'destination-user-20', 'hash');
+INSERT INTO videos(id, user_id, title, category, video_path, mime_type, size_bytes)
+VALUES (30, 10, 'Destination video', 'knowledge', 'videos/destination.mp4', 'video/mp4', 10);
+INSERT INTO comments(id, video_id, user_id, content) VALUES (40, 30, 20, 'destination comment');`); err != nil {
+		t.Fatal(err)
+	}
+
+	merged, err := MergeDatabase(ctx, destination, sourcePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if merged.Users != 2 || merged.Videos != 1 || merged.Comments != 1 || merged.Notifications != 1 {
+		t.Fatalf("unexpected notification merge stats: %#v", merged)
+	}
+
+	var notificationID, recipientID, actorID, videoID, commentID int64
+	var actorUsername, actorAvatarPath, videoTitle, commentPreview, readAt string
+	if err := destination.QueryRow(`
+SELECT id, recipient_id, actor_id, actor_username, actor_avatar_path, video_id,
+       video_title, comment_id, comment_preview, read_at
+FROM notifications`).Scan(
+		&notificationID, &recipientID, &actorID, &actorUsername, &actorAvatarPath, &videoID,
+		&videoTitle, &commentID, &commentPreview, &readAt); err != nil {
+		t.Fatal(err)
+	}
+	if notificationID == 50 {
+		t.Fatalf("notification retained source id %d; destination should allocate its own id", notificationID)
+	}
+	if recipientID == 10 || actorID == 20 || videoID == 30 || commentID == 40 {
+		t.Fatalf("notification relationships were not remapped: recipient=%d actor=%d video=%d comment=%d",
+			recipientID, actorID, videoID, commentID)
+	}
+	if actorUsername != "notification-actor" || actorAvatarPath != "avatars/actor.png" ||
+		videoTitle != "Notification video" || commentPreview != "mapped comment" || readAt == "" {
+		t.Fatalf("notification snapshots not preserved: actor=%q avatar=%q video=%q preview=%q read_at=%q",
+			actorUsername, actorAvatarPath, videoTitle, commentPreview, readAt)
+	}
+	var mappedRecipient, mappedActor, mappedVideo, mappedComment int64
+	if err := destination.QueryRow(`SELECT id FROM users WHERE username = 'notification-recipient'`).Scan(&mappedRecipient); err != nil {
+		t.Fatal(err)
+	}
+	if err := destination.QueryRow(`SELECT id FROM users WHERE username = 'notification-actor'`).Scan(&mappedActor); err != nil {
+		t.Fatal(err)
+	}
+	if err := destination.QueryRow(`SELECT id FROM videos WHERE video_path = 'videos/notification.mp4'`).Scan(&mappedVideo); err != nil {
+		t.Fatal(err)
+	}
+	if err := destination.QueryRow(`SELECT id FROM comments WHERE video_id = ? AND content = 'mapped comment'`, mappedVideo).Scan(&mappedComment); err != nil {
+		t.Fatal(err)
+	}
+	if recipientID != mappedRecipient || actorID != mappedActor || videoID != mappedVideo || commentID != mappedComment {
+		t.Fatalf("notification mappings = %d/%d/%d/%d, want %d/%d/%d/%d",
+			recipientID, actorID, videoID, commentID, mappedRecipient, mappedActor, mappedVideo, mappedComment)
+	}
+
+	stats, err := ReadDatabaseStats(ctx, destination)
+	if err != nil || stats.Notifications != 1 {
+		t.Fatalf("notification stats after merge: %#v err=%v", stats, err)
+	}
+	second, err := MergeDatabase(ctx, destination, sourcePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Users != 0 || second.Videos != 0 || second.Comments != 0 || second.Notifications != 0 {
+		t.Fatalf("notification merge is not repeatable: %#v", second)
 	}
 }

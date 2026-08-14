@@ -30,6 +30,78 @@ type testEnvelope struct {
 	RequestID string          `json:"request_id"`
 }
 
+func TestRootEndpoint(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Config{FrontendURL: "https://video.example.test", MediaDir: filepath.Join(dir, "media"), SessionTTL: time.Hour}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	db, err := platform.OpenDatabase(filepath.Join(dir, "root.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	handler := New(service.New(repository.New(db), cfg, logger), cfg, logger).Routes()
+
+	result := httptest.NewRecorder()
+	handler.ServeHTTP(result, httptest.NewRequest(http.MethodGet, "/", nil))
+	if result.Code != http.StatusOK {
+		t.Fatalf("root status=%d body=%s", result.Code, result.Body.String())
+	}
+	var envelope testEnvelope
+	decodeResponse(t, result, &envelope)
+	var payload map[string]string
+	if err := json.Unmarshal(envelope.Data, &payload); err != nil {
+		t.Fatalf("decode root payload: %v data=%s", err, envelope.Data)
+	}
+	want := map[string]string{
+		"service":  "gvideo-backend",
+		"status":   "ok",
+		"frontend": "https://video.example.test",
+		"health":   "/healthz",
+	}
+	for key, value := range want {
+		if payload[key] != value {
+			t.Fatalf("root payload[%q]=%q, want %q; payload=%#v", key, payload[key], value, payload)
+		}
+	}
+}
+
+func TestResponseHeadersAndStrictJSON(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Config{MediaDir: filepath.Join(dir, "media"), SessionTTL: time.Hour}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	db, err := platform.OpenDatabase(filepath.Join(dir, "headers.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	handler := New(service.New(repository.New(db), cfg, logger), cfg, logger).Routes()
+
+	categories := httptest.NewRecorder()
+	handler.ServeHTTP(categories, httptest.NewRequest(http.MethodGet, "/api/v1/categories", nil))
+	if categories.Code != http.StatusOK || categories.Header().Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatalf("categories status=%d nosniff=%q", categories.Code, categories.Header().Get("X-Content-Type-Options"))
+	}
+	if categories.Header().Get("Cache-Control") != "" {
+		t.Fatalf("public response unexpectedly disabled caching: %q", categories.Header().Get("Cache-Control"))
+	}
+
+	me := httptest.NewRecorder()
+	handler.ServeHTTP(me, httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil))
+	if me.Code != http.StatusUnauthorized || me.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("me status=%d cache-control=%q", me.Code, me.Header().Get("Cache-Control"))
+	}
+
+	register := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/auth/register", strings.NewReader(
+		`{"username":"strict_json_user","password":"password123"}{"unexpected":true}`,
+	))
+	request.Header.Set("Content-Type", "application/json")
+	handler.ServeHTTP(register, request)
+	if register.Code != http.StatusBadRequest || !strings.Contains(register.Body.String(), "只能包含一个 JSON 对象") {
+		t.Fatalf("trailing JSON status=%d body=%s", register.Code, register.Body.String())
+	}
+}
+
 func TestCoreVideoFlow(t *testing.T) {
 	dir := t.TempDir()
 	db, err := platform.OpenDatabase(filepath.Join(dir, "test.db"))
@@ -803,6 +875,210 @@ func registerTestUser(t *testing.T, handler http.Handler, username string) testA
 		t.Fatalf("incomplete auth payload for %s: %#v", username, payload)
 	}
 	return testAuthClient{User: payload.User, Cookie: cookies[0], CSRFToken: payload.CSRFToken}
+}
+
+func TestDeleteCommentHTTPAuthorization(t *testing.T) {
+	dir := t.TempDir()
+	db, err := platform.OpenDatabase(filepath.Join(dir, "comments.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	repo := repository.New(db)
+	cfg := config.Config{MediaDir: filepath.Join(dir, "media"), SessionTTL: time.Hour}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	handler := New(service.New(repo, cfg, logger), cfg, logger).Routes()
+	owner := registerTestUser(t, handler, "delete_comment_owner")
+	author := registerTestUser(t, handler, "delete_comment_author")
+	other := registerTestUser(t, handler, "delete_comment_other")
+	video, err := repo.CreateVideo(context.Background(), domain.NewVideo{UserID: owner.User.ID, Title: "Delete comment", Category: "knowledge", VideoPath: "videos/delete-comment.mp4", MimeType: "video/mp4", SizeBytes: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	comment, err := repo.CreateComment(context.Background(), author.User.ID, video.ID, "delete through HTTP")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := fmt.Sprintf("/api/v1/videos/%d/comments/%d", video.ID, comment.ID)
+
+	result := httptest.NewRecorder()
+	handler.ServeHTTP(result, httptest.NewRequest(http.MethodDelete, path, nil))
+	if result.Code != http.StatusUnauthorized {
+		t.Fatalf("anonymous status=%d body=%s", result.Code, result.Body.String())
+	}
+	result = httptest.NewRecorder()
+	handler.ServeHTTP(result, authorizedRequest(http.MethodDelete, path, nil, author.Cookie, ""))
+	if result.Code != http.StatusForbidden {
+		t.Fatalf("missing CSRF status=%d body=%s", result.Code, result.Body.String())
+	}
+	result = httptest.NewRecorder()
+	handler.ServeHTTP(result, authorizedRequest(http.MethodDelete, path, nil, other.Cookie, other.CSRFToken))
+	if result.Code != http.StatusForbidden {
+		t.Fatalf("other status=%d body=%s", result.Code, result.Body.String())
+	}
+	result = httptest.NewRecorder()
+	handler.ServeHTTP(result, authorizedRequest(http.MethodDelete, path, nil, owner.Cookie, owner.CSRFToken))
+	if result.Code != http.StatusOK || !strings.Contains(result.Body.String(), `"deleted":true`) {
+		t.Fatalf("owner status=%d body=%s", result.Code, result.Body.String())
+	}
+}
+
+func TestAdminReportEndpoints(t *testing.T) {
+	dir := t.TempDir()
+	db, err := platform.OpenDatabase(filepath.Join(dir, "admin-reports.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	repo := repository.New(db)
+	cfg := config.Config{AdminUsername: "http_report_admin", MediaDir: filepath.Join(dir, "media"), SessionTTL: time.Hour}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	handler := New(service.New(repo, cfg, logger), cfg, logger).Routes()
+	admin := registerTestUser(t, handler, "http_report_admin")
+	author := registerTestUser(t, handler, "http_report_author")
+	reporter := registerTestUser(t, handler, "http_report_viewer")
+	video, err := repo.CreateVideo(context.Background(), domain.NewVideo{UserID: author.User.ID, Title: "Admin report", Category: service.Categories[0], VideoPath: "videos/admin-report.mp4", MimeType: "video/mp4", SizeBytes: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := repo.UpsertVideoReport(context.Background(), video.ID, reporter.User.ID, "spam", "review through HTTP")
+	if err != nil {
+		t.Fatal(err)
+	}
+	forbidden := httptest.NewRecorder()
+	handler.ServeHTTP(forbidden, authorizedRequest(http.MethodGet, "/api/v1/admin/reports", nil, reporter.Cookie, ""))
+	if forbidden.Code != http.StatusForbidden {
+		t.Fatalf("ordinary list status=%d body=%s", forbidden.Code, forbidden.Body.String())
+	}
+	list := httptest.NewRecorder()
+	handler.ServeHTTP(list, authorizedRequest(http.MethodGet, "/api/v1/admin/reports?status=pending", nil, admin.Cookie, ""))
+	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), `"total":1`) || !strings.Contains(list.Body.String(), `"video_title":"Admin report"`) {
+		t.Fatalf("admin list status=%d body=%s", list.Code, list.Body.String())
+	}
+	updateRequest := authorizedRequest(http.MethodPatch, fmt.Sprintf("/api/v1/admin/reports/%d", report.ID), strings.NewReader(`{"status":"resolved"}`), admin.Cookie, admin.CSRFToken)
+	updateRequest.Header.Set("Content-Type", "application/json")
+	update := httptest.NewRecorder()
+	handler.ServeHTTP(update, updateRequest)
+	if update.Code != http.StatusOK || !strings.Contains(update.Body.String(), `"status":"resolved"`) {
+		t.Fatalf("admin update status=%d body=%s", update.Code, update.Body.String())
+	}
+	noCSRFRequest := authorizedRequest(http.MethodPatch, fmt.Sprintf("/api/v1/admin/reports/%d", report.ID), strings.NewReader(`{"status":"dismissed"}`), admin.Cookie, "")
+	noCSRFRequest.Header.Set("Content-Type", "application/json")
+	noCSRF := httptest.NewRecorder()
+	handler.ServeHTTP(noCSRF, noCSRFRequest)
+	if noCSRF.Code != http.StatusForbidden {
+		t.Fatalf("missing csrf status=%d body=%s", noCSRF.Code, noCSRF.Body.String())
+	}
+}
+
+func TestFavoriteVideosEndpoint(t *testing.T) {
+	dir := t.TempDir()
+	db, err := platform.OpenDatabase(filepath.Join(dir, "favorites.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	repo := repository.New(db)
+	cfg := config.Config{MediaDir: filepath.Join(dir, "media"), SessionTTL: time.Hour}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	handler := New(service.New(repo, cfg, logger), cfg, logger).Routes()
+	auth := registerTestUser(t, handler, "favorite_endpoint_user")
+	video, err := repo.CreateVideo(context.Background(), domain.NewVideo{UserID: auth.User.ID, Title: "Favorite endpoint", Category: "knowledge", VideoPath: "videos/favorite-endpoint.mp4", MimeType: "video/mp4", SizeBytes: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.ToggleFavorite(context.Background(), auth.User.ID, video.ID); err != nil {
+		t.Fatal(err)
+	}
+	request := authorizedRequest(http.MethodGet, "/api/v1/me/favorites?page=1&page_size=24", nil, auth.Cookie, "")
+	result := httptest.NewRecorder()
+	handler.ServeHTTP(result, request)
+	if result.Code != http.StatusOK || !strings.Contains(result.Body.String(), "Favorite endpoint") {
+		t.Fatalf("favorites status=%d body=%s", result.Code, result.Body.String())
+	}
+}
+
+func TestNotificationEndpointsAuthenticationCSRFAndOwnership(t *testing.T) {
+	dir := t.TempDir()
+	db, err := platform.OpenDatabase(filepath.Join(dir, "notifications.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	repo := repository.New(db)
+	cfg := config.Config{MediaDir: filepath.Join(dir, "media"), SessionTTL: time.Hour}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	handler := New(service.New(repo, cfg, logger), cfg, logger).Routes()
+	recipient := registerTestUser(t, handler, "notify_recipient")
+	actor := registerTestUser(t, handler, "notify_actor")
+	other := registerTestUser(t, handler, "notify_other")
+	ctx := context.Background()
+	video, err := repo.CreateVideo(ctx, domain.NewVideo{
+		UserID: recipient.User.ID, Title: "HTTP notification video", Category: "knowledge",
+		VideoPath: "videos/http-notifications.mp4", MimeType: "video/mp4", SizeBytes: 10,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateNotification(ctx, recipient.User.ID, actor.User.ID, "like", video.ID, 0, video.Title, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	result := httptest.NewRecorder()
+	handler.ServeHTTP(result, httptest.NewRequest(http.MethodGet, "/api/v1/me/notifications", nil))
+	if result.Code != http.StatusUnauthorized {
+		t.Fatalf("anonymous list status=%d body=%s", result.Code, result.Body.String())
+	}
+	result = httptest.NewRecorder()
+	handler.ServeHTTP(result, authorizedRequest(http.MethodGet, "/api/v1/me/notifications?page=1&page_size=20", nil, recipient.Cookie, ""))
+	if result.Code != http.StatusOK {
+		t.Fatalf("list status=%d body=%s", result.Code, result.Body.String())
+	}
+	var envelope testEnvelope
+	decodeResponse(t, result, &envelope)
+	var page domain.NotificationPage
+	if err := json.Unmarshal(envelope.Data, &page); err != nil {
+		t.Fatal(err)
+	}
+	if page.Total != 1 || page.UnreadCount != 1 || len(page.Items) != 1 || page.Items[0].ActorID != actor.User.ID {
+		t.Fatalf("unexpected notification page: %#v", page)
+	}
+	notificationID := strconv.FormatInt(page.Items[0].ID, 10)
+	readPath := "/api/v1/me/notifications/" + notificationID + "/read"
+
+	result = httptest.NewRecorder()
+	handler.ServeHTTP(result, authorizedRequest(http.MethodPatch, readPath, nil, recipient.Cookie, ""))
+	if result.Code != http.StatusForbidden {
+		t.Fatalf("missing CSRF status=%d body=%s", result.Code, result.Body.String())
+	}
+	result = httptest.NewRecorder()
+	handler.ServeHTTP(result, authorizedRequest(http.MethodPatch, readPath, nil, other.Cookie, other.CSRFToken))
+	if result.Code != http.StatusNotFound {
+		t.Fatalf("cross-user mark status=%d body=%s", result.Code, result.Body.String())
+	}
+	result = httptest.NewRecorder()
+	handler.ServeHTTP(result, authorizedRequest(http.MethodPatch, readPath, nil, recipient.Cookie, recipient.CSRFToken))
+	if result.Code != http.StatusOK {
+		t.Fatalf("mark read status=%d body=%s", result.Code, result.Body.String())
+	}
+
+	if err := repo.CreateNotification(ctx, recipient.User.ID, actor.User.ID, "favorite", video.ID, 0, video.Title, ""); err != nil {
+		t.Fatal(err)
+	}
+	result = httptest.NewRecorder()
+	handler.ServeHTTP(result, authorizedRequest(http.MethodPost, "/api/v1/me/notifications/read-all", nil, recipient.Cookie, "wrong-token"))
+	if result.Code != http.StatusForbidden {
+		t.Fatalf("wrong CSRF read-all status=%d body=%s", result.Code, result.Body.String())
+	}
+	result = httptest.NewRecorder()
+	handler.ServeHTTP(result, authorizedRequest(http.MethodPost, "/api/v1/me/notifications/read-all", nil, recipient.Cookie, recipient.CSRFToken))
+	if result.Code != http.StatusOK {
+		t.Fatalf("read-all status=%d body=%s", result.Code, result.Body.String())
+	}
+	page, err = repo.ListNotifications(ctx, recipient.User.ID, 1, 20)
+	if err != nil || page.UnreadCount != 0 {
+		t.Fatalf("read-all page=%#v err=%v", page, err)
+	}
 }
 
 func videoEditBody(t *testing.T, title, description, category string) (*bytes.Buffer, string) {

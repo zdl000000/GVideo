@@ -1,5 +1,8 @@
 .idea/
 .vscode/
+.codex/
+.DS_Store
+Thumbs.db
 .env
 .env.*
 !.env.example
@@ -34,6 +37,8 @@ backend/*.test
 frontend/node_modules/
 frontend/dist/
 frontend/.vite/
+frontend/test-results/
+frontend/playwright-report/
 node_modules/
 dist/
 coverage/
@@ -41,6 +46,7 @@ coverage/
 logs/
 .backend.pid
 .frontend.pid
+*.pid
 tmp/
 temp/
 backups/

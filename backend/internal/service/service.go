@@ -121,6 +121,7 @@ func (s *Service) newSession(ctx context.Context, user domain.User) (CreatedSess
 	if err := s.repo.CreateSession(ctx, hashToken(token), user.ID, csrf, time.Now().Add(s.cfg.SessionTTL)); err != nil {
 		return CreatedSession{}, err
 	}
+	user.IsAdmin = s.IsAdmin(user.Username)
 	return CreatedSession{Token: token, CSRFToken: csrf, User: user}, nil
 }
 
@@ -128,7 +129,16 @@ func (s *Service) Authenticate(ctx context.Context, token string) (domain.Sessio
 	if token == "" {
 		return domain.Session{}, domain.ErrInvalidSession
 	}
-	return s.repo.SessionByHash(ctx, hashToken(token))
+	session, err := s.repo.SessionByHash(ctx, hashToken(token))
+	if err != nil {
+		return domain.Session{}, err
+	}
+	session.User.IsAdmin = s.IsAdmin(session.User.Username)
+	return session, nil
+}
+
+func (s *Service) IsAdmin(username string) bool {
+	return s.cfg.AdminUsername != "" && strings.EqualFold(strings.TrimSpace(username), strings.TrimSpace(s.cfg.AdminUsername))
 }
 
 func (s *Service) Logout(ctx context.Context, token string) error {
@@ -136,6 +146,83 @@ func (s *Service) Logout(ctx context.Context, token string) error {
 		return nil
 	}
 	return s.repo.DeleteSession(ctx, hashToken(token))
+}
+
+func (s *Service) ChangePassword(ctx context.Context, userID int64, currentToken, currentPassword, newPassword string) error {
+	if userID <= 0 || currentToken == "" || len(newPassword) < 8 || len(newPassword) > 72 {
+		return domain.ErrInvalidInput
+	}
+	_, hash, err := s.repo.UserAuthByID(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(currentPassword)) != nil {
+		return domain.ErrUnauthorized
+	}
+	newHash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("hash new password: %w", err)
+	}
+	if err := s.repo.UpdatePasswordHash(ctx, userID, string(newHash)); err != nil {
+		return err
+	}
+	return s.repo.DeleteOtherSessions(ctx, userID, hashToken(currentToken))
+}
+
+func (s *Service) ReportVideo(ctx context.Context, userID, videoID int64, reason, detail string) (domain.VideoReport, error) {
+	reason = strings.TrimSpace(reason)
+	detail = strings.TrimSpace(detail)
+	if userID <= 0 || videoID <= 0 || !validReportReason(reason) || len([]rune(detail)) > 1000 {
+		return domain.VideoReport{}, domain.ErrInvalidInput
+	}
+	video, err := s.repo.VideoByID(ctx, videoID, userID)
+	if err != nil {
+		return domain.VideoReport{}, err
+	}
+	if video.UserID == userID {
+		return domain.VideoReport{}, domain.ErrForbidden
+	}
+	return s.repo.UpsertVideoReport(ctx, videoID, userID, reason, detail)
+}
+
+func validReportReason(reason string) bool {
+	switch reason {
+	case "spam", "inappropriate", "copyright", "other":
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *Service) AdminVideoReports(ctx context.Context, username, status string, page, pageSize int) (domain.VideoReportPage, error) {
+	if !s.IsAdmin(username) {
+		return domain.VideoReportPage{}, domain.ErrForbidden
+	}
+	status = strings.TrimSpace(status)
+	if status != "" && !validReportStatus(status) {
+		return domain.VideoReportPage{}, domain.ErrInvalidInput
+	}
+	return s.repo.ListVideoReports(ctx, status, page, pageSize)
+}
+
+func (s *Service) ReviewVideoReport(ctx context.Context, username string, reportID int64, status string) (domain.VideoReport, error) {
+	if !s.IsAdmin(username) {
+		return domain.VideoReport{}, domain.ErrForbidden
+	}
+	status = strings.TrimSpace(status)
+	if reportID <= 0 || !validReportStatus(status) {
+		return domain.VideoReport{}, domain.ErrInvalidInput
+	}
+	return s.repo.UpdateVideoReportStatus(ctx, reportID, status)
+}
+
+func validReportStatus(status string) bool {
+	switch status {
+	case "pending", "reviewed", "resolved", "dismissed":
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Service) ListVideos(ctx context.Context, filter domain.VideoFilter, viewerID int64) (domain.VideoPage, error) {
@@ -250,7 +337,16 @@ func (s *Service) ToggleFollow(ctx context.Context, followerID, followedID int64
 	if _, err := s.repo.UserByID(ctx, followedID); err != nil {
 		return false, err
 	}
-	return s.repo.ToggleFollow(ctx, followerID, followedID)
+	active, err := s.repo.ToggleFollow(ctx, followerID, followedID)
+	if err != nil {
+		return false, err
+	}
+	if active {
+		if err := s.repo.CreateNotification(ctx, followedID, followerID, "follow", 0, 0, "", ""); err != nil {
+			s.logger.Warn("create follow notification", "recipient_id", followedID, "actor_id", followerID, "error", err)
+		}
+	}
+	return active, nil
 }
 
 func (s *Service) Video(ctx context.Context, id, viewerID int64, countView bool) (domain.Video, error) {
@@ -522,17 +618,37 @@ func (s *Service) RetryTranscoding(ctx context.Context, userID, videoID int64) e
 }
 
 func (s *Service) ToggleLike(ctx context.Context, userID, videoID int64) (bool, error) {
-	if _, err := s.repo.VideoByID(ctx, videoID, userID); err != nil {
+	video, err := s.repo.VideoByID(ctx, videoID, userID)
+	if err != nil {
 		return false, err
 	}
-	return s.repo.ToggleLike(ctx, userID, videoID)
+	active, err := s.repo.ToggleLike(ctx, userID, videoID)
+	if err != nil {
+		return false, err
+	}
+	if active {
+		if err := s.repo.CreateNotification(ctx, video.UserID, userID, "like", videoID, 0, video.Title, ""); err != nil {
+			s.logger.Warn("create like notification", "recipient_id", video.UserID, "video_id", videoID, "error", err)
+		}
+	}
+	return active, nil
 }
 
 func (s *Service) ToggleFavorite(ctx context.Context, userID, videoID int64) (bool, error) {
-	if _, err := s.repo.VideoByID(ctx, videoID, userID); err != nil {
+	video, err := s.repo.VideoByID(ctx, videoID, userID)
+	if err != nil {
 		return false, err
 	}
-	return s.repo.ToggleFavorite(ctx, userID, videoID)
+	active, err := s.repo.ToggleFavorite(ctx, userID, videoID)
+	if err != nil {
+		return false, err
+	}
+	if active {
+		if err := s.repo.CreateNotification(ctx, video.UserID, userID, "favorite", videoID, 0, video.Title, ""); err != nil {
+			s.logger.Warn("create favorite notification", "recipient_id", video.UserID, "video_id", videoID, "error", err)
+		}
+	}
+	return active, nil
 }
 
 func (s *Service) Comments(ctx context.Context, videoID, viewerID int64) ([]domain.Comment, error) {
@@ -547,10 +663,50 @@ func (s *Service) CreateComment(ctx context.Context, userID, videoID int64, cont
 	if len([]rune(content)) < 1 || len([]rune(content)) > 500 {
 		return domain.Comment{}, domain.ErrInvalidInput
 	}
-	if _, err := s.repo.VideoByID(ctx, videoID, userID); err != nil {
+	video, err := s.repo.VideoByID(ctx, videoID, userID)
+	if err != nil {
 		return domain.Comment{}, err
 	}
-	return s.repo.CreateComment(ctx, userID, videoID, content)
+	comment, err := s.repo.CreateComment(ctx, userID, videoID, content)
+	if err != nil {
+		return domain.Comment{}, err
+	}
+	if err := s.repo.CreateNotification(ctx, video.UserID, userID, "comment", videoID, comment.ID, video.Title, comment.Content); err != nil {
+		s.logger.Warn("create comment notification", "recipient_id", video.UserID, "video_id", videoID, "error", err)
+	}
+	return comment, nil
+}
+
+func (s *Service) DeleteComment(ctx context.Context, userID, videoID, commentID int64) error {
+	if userID <= 0 || videoID <= 0 || commentID <= 0 {
+		return domain.ErrInvalidInput
+	}
+	return s.repo.DeleteComment(ctx, userID, videoID, commentID)
+}
+
+func (s *Service) Notifications(ctx context.Context, userID int64, page, pageSize int) (domain.NotificationPage, error) {
+	if userID <= 0 {
+		return domain.NotificationPage{}, domain.ErrInvalidInput
+	}
+	result, err := s.repo.ListNotifications(ctx, userID, page, pageSize)
+	if err != nil {
+		return domain.NotificationPage{}, err
+	}
+	return result, nil
+}
+
+func (s *Service) MarkNotificationRead(ctx context.Context, userID, notificationID int64) error {
+	if userID <= 0 || notificationID <= 0 {
+		return domain.ErrInvalidInput
+	}
+	return s.repo.MarkNotificationRead(ctx, userID, notificationID)
+}
+
+func (s *Service) MarkAllNotificationsRead(ctx context.Context, userID int64) error {
+	if userID <= 0 {
+		return domain.ErrInvalidInput
+	}
+	return s.repo.MarkAllNotificationsRead(ctx, userID)
 }
 
 func (s *Service) AuthorizeMedia(ctx context.Context, storedPath string, viewerID int64) error {

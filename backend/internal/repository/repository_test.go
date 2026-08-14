@@ -86,6 +86,225 @@ func TestVideoInteractions(t *testing.T) {
 	}
 }
 
+func TestFavoriteVideosAreFilteredAndSortedByFavoriteTime(t *testing.T) {
+	db, err := platform.OpenDatabase(filepath.Join(t.TempDir(), "favorites.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	repo := New(db)
+	ctx := context.Background()
+	user, err := repo.CreateUser(ctx, "favorite_list_user", "hash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := repo.CreateUser(ctx, "favorite_list_other", "hash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := repo.CreateVideo(ctx, domain.NewVideo{UserID: other.ID, Title: "Older favorite", Category: "knowledge", VideoPath: "videos/older.mp4", MimeType: "video/mp4", SizeBytes: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := repo.CreateVideo(ctx, domain.NewVideo{UserID: other.ID, Title: "Newer favorite", Category: "knowledge", VideoPath: "videos/newer.mp4", MimeType: "video/mp4", SizeBytes: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	private, err := repo.CreateVideo(ctx, domain.NewVideo{UserID: other.ID, Title: "Private favorite", Category: "knowledge", Visibility: "private", VideoPath: "videos/private.mp4", MimeType: "video/mp4", SizeBytes: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.ToggleFavorite(ctx, user.ID, first.ID); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(1100 * time.Millisecond)
+	if _, err := repo.ToggleFavorite(ctx, user.ID, second.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.ToggleFavorite(ctx, user.ID, private.ID); err != nil {
+		t.Fatal(err)
+	}
+	items, err := repo.ListVideos(ctx, domain.VideoFilter{FavoriteUserID: user.ID, Limit: 10}, user.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 || items[0].ID != second.ID || items[1].ID != first.ID {
+		t.Fatalf("favorite items = %#v", items)
+	}
+	count, err := repo.CountVideos(ctx, domain.VideoFilter{FavoriteUserID: user.ID})
+	if err != nil || count != 2 {
+		t.Fatalf("favorite count=%d err=%v", count, err)
+	}
+}
+
+func TestVideoReportReviewLifecycle(t *testing.T) {
+	db, err := platform.OpenDatabase(filepath.Join(t.TempDir(), "reports.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	repo := New(db)
+	ctx := context.Background()
+	author, err := repo.CreateUser(ctx, "report_review_author", "hash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reporter, err := repo.CreateUser(ctx, "report_review_viewer", "hash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	video, err := repo.CreateVideo(ctx, domain.NewVideo{UserID: author.ID, Title: "Review target", Category: "knowledge", VideoPath: "videos/review.mp4", MimeType: "video/mp4", SizeBytes: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := repo.UpsertVideoReport(ctx, video.ID, reporter.ID, "spam", "review this")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := repo.ListVideoReports(ctx, "pending", 1, 20)
+	if err != nil || page.Total != 1 || len(page.Items) != 1 || page.Items[0].VideoTitle != video.Title || page.Items[0].ReporterUsername != reporter.Username {
+		t.Fatalf("pending reports = %#v err=%v", page, err)
+	}
+	updated, err := repo.UpdateVideoReportStatus(ctx, report.ID, "resolved")
+	if err != nil || updated.Status != "resolved" || updated.VideoAuthor != author.Username {
+		t.Fatalf("updated report = %#v err=%v", updated, err)
+	}
+	pending, err := repo.ListVideoReports(ctx, "pending", 1, 20)
+	if err != nil || pending.Total != 0 || len(pending.Items) != 0 {
+		t.Fatalf("pending after review = %#v err=%v", pending, err)
+	}
+}
+
+func TestDeleteCommentAuthorization(t *testing.T) {
+	db, err := platform.OpenDatabase(filepath.Join(t.TempDir(), "comments.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	repo := New(db)
+	ctx := context.Background()
+	owner, err := repo.CreateUser(ctx, "comment_video_owner", "hash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	author, err := repo.CreateUser(ctx, "comment_author", "hash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := repo.CreateUser(ctx, "comment_other", "hash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	video, err := repo.CreateVideo(ctx, domain.NewVideo{UserID: owner.ID, Title: "Comments", Category: "知识", VideoPath: "videos/comments.mp4", MimeType: "video/mp4", SizeBytes: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	comment, err := repo.CreateComment(ctx, author.ID, video.ID, "remove me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.DeleteComment(ctx, other.ID, video.ID, comment.ID); !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("other delete error = %v, want forbidden", err)
+	}
+	if err := repo.DeleteComment(ctx, owner.ID, video.ID, comment.ID); err != nil {
+		t.Fatalf("video owner delete: %v", err)
+	}
+	comments, err := repo.ListComments(ctx, video.ID)
+	if err != nil || len(comments) != 0 {
+		t.Fatalf("comments after delete = %#v err=%v", comments, err)
+	}
+	comment, err = repo.CreateComment(ctx, author.ID, video.ID, "author removes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.DeleteComment(ctx, author.ID, video.ID, comment.ID); err != nil {
+		t.Fatalf("comment author delete: %v", err)
+	}
+}
+
+func TestNotificationsLifecycleAndOwnership(t *testing.T) {
+	db, err := platform.OpenDatabase(filepath.Join(t.TempDir(), "notifications.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	repo := New(db)
+	ctx := context.Background()
+	recipient, err := repo.CreateUser(ctx, "notification_recipient", "hash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	actor, err := repo.CreateUser(ctx, "notification_actor", "hash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := repo.CreateUser(ctx, "notification_other", "hash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	video, err := repo.CreateVideo(ctx, domain.NewVideo{
+		UserID: recipient.ID, Title: "Notification video", Category: "knowledge",
+		VideoPath: "videos/notification.mp4", MimeType: "video/mp4", SizeBytes: 10,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	comment, err := repo.CreateComment(ctx, actor.ID, video.ID, "notification comment")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := repo.CreateNotification(ctx, recipient.ID, actor.ID, "comment", video.ID, comment.ID, video.Title, comment.Content); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateNotification(ctx, recipient.ID, actor.ID, "like", video.ID, 0, video.Title, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateNotification(ctx, recipient.ID, recipient.ID, "favorite", video.ID, 0, video.Title, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	page, err := repo.ListNotifications(ctx, recipient.ID, 1, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Total != 2 || page.UnreadCount != 2 || len(page.Items) != 1 || !page.HasNext {
+		t.Fatalf("unexpected first notification page: %#v", page)
+	}
+	first := page.Items[0]
+	if first.ActorID != actor.ID || first.ActorUsername != actor.Username || first.VideoID != video.ID || first.VideoTitle != video.Title {
+		t.Fatalf("notification snapshots not populated: %#v", first)
+	}
+
+	if err := repo.MarkNotificationRead(ctx, other.ID, first.ID); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("other user mark read error = %v, want not found", err)
+	}
+	if err := repo.MarkNotificationRead(ctx, recipient.ID, first.ID); err != nil {
+		t.Fatal(err)
+	}
+	page, err = repo.ListNotifications(ctx, recipient.ID, 1, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.UnreadCount != 1 || len(page.Items) != 2 || page.Items[0].ReadAt == nil {
+		t.Fatalf("single read state not persisted: %#v", page)
+	}
+	if err := repo.MarkAllNotificationsRead(ctx, recipient.ID); err != nil {
+		t.Fatal(err)
+	}
+	page, err = repo.ListNotifications(ctx, recipient.ID, 1, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.UnreadCount != 0 {
+		t.Fatalf("unread count = %d, want 0", page.UnreadCount)
+	}
+	otherPage, err := repo.ListNotifications(ctx, other.ID, 1, 20)
+	if err != nil || otherPage.Total != 0 {
+		t.Fatalf("other user notifications = %#v err=%v", otherPage, err)
+	}
+}
+
 func TestTranscodingProgressRetryFailureAndCompletion(t *testing.T) {
 	db, err := platform.OpenDatabase(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {

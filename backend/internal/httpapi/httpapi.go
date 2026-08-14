@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"mime/multipart"
 	"net/http"
@@ -56,8 +57,10 @@ func (h *Handler) Routes() http.Handler {
 	router.Use(h.accessLog)
 	router.Use(middleware.RealIP)
 	router.Use(middleware.Compress(5))
+	router.Use(h.responseHeaders)
 	router.Use(h.optionalSession)
 
+	router.Get("/", h.root)
 	router.Get("/healthz", h.health)
 	router.Get("/media/*", h.media)
 	router.Route("/api/v1", func(api chi.Router) {
@@ -67,7 +70,13 @@ func (h *Handler) Routes() http.Handler {
 		api.With(h.requireAuth, h.requireCSRF).Post("/auth/logout", h.logout)
 		api.With(h.requireAuth).Get("/auth/me", h.me)
 		api.With(h.requireAuth, h.requireCSRF).Patch("/me/profile", h.updateProfile)
+		api.With(h.requireAuth, h.requireCSRF).Post("/me/password", h.changePassword)
 		api.With(h.requireAuth).Get("/me/creator/stats", h.creatorStats)
+		api.With(h.requireAuth).Get("/me/notifications", h.notifications)
+		api.With(h.requireAuth, h.requireCSRF).Patch("/me/notifications/{notificationID}/read", h.markNotificationRead)
+		api.With(h.requireAuth, h.requireCSRF).Post("/me/notifications/read-all", h.markAllNotificationsRead)
+		api.With(h.requireAuth).Get("/admin/reports", h.adminReports)
+		api.With(h.requireAuth, h.requireCSRF).Patch("/admin/reports/{reportID}", h.reviewReport)
 
 		api.Get("/videos", h.listVideos)
 		api.Get("/videos/{videoID}", h.getVideo)
@@ -81,9 +90,12 @@ func (h *Handler) Routes() http.Handler {
 		api.With(h.requireAuth, h.requireCSRF).Delete("/videos/{videoID}/subtitles/{subtitleID}", h.deleteSubtitle)
 		api.With(h.requireAuth, h.requireCSRF).Post("/videos/{videoID}/like", h.toggleLike)
 		api.With(h.requireAuth, h.requireCSRF).Post("/videos/{videoID}/favorite", h.toggleFavorite)
+		api.With(h.requireAuth, h.requireCSRF).Post("/videos/{videoID}/reports", h.reportVideo)
 		api.With(h.requireAuth, h.requireCSRF).Post("/videos/{videoID}/comments", h.createComment)
+		api.With(h.requireAuth, h.requireCSRF).Delete("/videos/{videoID}/comments/{commentID}", h.deleteComment)
 		api.With(h.requireAuth).Get("/me/videos", h.myVideos)
 		api.With(h.requireAuth).Get("/me/following/videos", h.followingVideos)
+		api.With(h.requireAuth).Get("/me/favorites", h.favoriteVideos)
 		api.Get("/users/{userID}", h.getCreator)
 		api.Get("/users/{userID}/videos", h.creatorVideos)
 		api.With(h.requireAuth, h.requireCSRF).Post("/users/{userID}/follow", h.toggleFollow)
@@ -153,6 +165,15 @@ func (h *Handler) health(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, r, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+func (h *Handler) root(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, r, http.StatusOK, map[string]string{
+		"service":  "gvideo-backend",
+		"status":   "ok",
+		"frontend": h.cfg.FrontendURL,
+		"health":   "/healthz",
+	})
+}
+
 func (h *Handler) categories(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, r, http.StatusOK, service.Categories)
 }
@@ -210,6 +231,26 @@ func (h *Handler) me(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, r, http.StatusOK, map[string]any{"user": session.User, "csrf_token": session.CSRFToken})
 }
 
+func (h *Handler) changePassword(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		CurrentPassword string `json:"current_password"`
+		NewPassword     string `json:"new_password"`
+	}
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	cookie, err := r.Cookie(sessionCookie)
+	if err != nil || cookie.Value == "" {
+		writeProblem(w, r, http.StatusUnauthorized, "Authentication required")
+		return
+	}
+	if err := h.service.ChangePassword(r.Context(), sessionFrom(r.Context()).User.ID, cookie.Value, input.CurrentPassword, input.NewPassword); err != nil {
+		h.writeError(w, r, err)
+		return
+	}
+	writeJSON(w, r, http.StatusOK, map[string]bool{"changed": true})
+}
+
 func (h *Handler) updateProfile(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 11<<20)
 	if err := r.ParseMultipartForm(11 << 20); err != nil {
@@ -239,6 +280,37 @@ func (h *Handler) creatorStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, r, http.StatusOK, stats)
+}
+
+func (h *Handler) notifications(w http.ResponseWriter, r *http.Request) {
+	page, pageSize := pagination(r, 20)
+	result, err := h.service.Notifications(r.Context(), sessionFrom(r.Context()).User.ID, page, pageSize)
+	if err != nil {
+		h.writeError(w, r, err)
+		return
+	}
+	writeJSON(w, r, http.StatusOK, result)
+}
+
+func (h *Handler) markNotificationRead(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "notificationID"), 10, 64)
+	if err != nil || id <= 0 {
+		writeProblem(w, r, http.StatusBadRequest, "通知编号无效")
+		return
+	}
+	if err := h.service.MarkNotificationRead(r.Context(), sessionFrom(r.Context()).User.ID, id); err != nil {
+		h.writeError(w, r, err)
+		return
+	}
+	writeJSON(w, r, http.StatusOK, map[string]bool{"read": true})
+}
+
+func (h *Handler) markAllNotificationsRead(w http.ResponseWriter, r *http.Request) {
+	if err := h.service.MarkAllNotificationsRead(r.Context(), sessionFrom(r.Context()).User.ID); err != nil {
+		h.writeError(w, r, err)
+		return
+	}
+	writeJSON(w, r, http.StatusOK, map[string]bool{"read": true})
 }
 
 func (h *Handler) listVideos(w http.ResponseWriter, r *http.Request) {
@@ -273,6 +345,19 @@ func (h *Handler) followingVideos(w http.ResponseWriter, r *http.Request) {
 	page, pageSize := pagination(r, 24)
 	result, err := h.service.ListVideos(r.Context(), domain.VideoFilter{
 		FollowingUserID: userID, Limit: pageSize, Offset: (page - 1) * pageSize,
+	}, userID)
+	if err != nil {
+		h.writeError(w, r, err)
+		return
+	}
+	writeJSON(w, r, http.StatusOK, result)
+}
+
+func (h *Handler) favoriteVideos(w http.ResponseWriter, r *http.Request) {
+	userID := sessionFrom(r.Context()).User.ID
+	page, pageSize := pagination(r, 24)
+	result, err := h.service.ListVideos(r.Context(), domain.VideoFilter{
+		FavoriteUserID: userID, Limit: pageSize, Offset: (page - 1) * pageSize,
 	}, userID)
 	if err != nil {
 		h.writeError(w, r, err)
@@ -483,6 +568,56 @@ func (h *Handler) toggleFavorite(w http.ResponseWriter, r *http.Request) {
 	h.toggle(w, r, h.service.ToggleFavorite)
 }
 
+func (h *Handler) reportVideo(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	var input struct {
+		Reason string `json:"reason"`
+		Detail string `json:"detail"`
+	}
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	report, err := h.service.ReportVideo(r.Context(), sessionFrom(r.Context()).User.ID, id, input.Reason, input.Detail)
+	if err != nil {
+		h.writeError(w, r, err)
+		return
+	}
+	writeJSON(w, r, http.StatusCreated, report)
+}
+
+func (h *Handler) adminReports(w http.ResponseWriter, r *http.Request) {
+	page, pageSize := pagination(r, 20)
+	result, err := h.service.AdminVideoReports(r.Context(), sessionFrom(r.Context()).User.Username, r.URL.Query().Get("status"), page, pageSize)
+	if err != nil {
+		h.writeError(w, r, err)
+		return
+	}
+	writeJSON(w, r, http.StatusOK, result)
+}
+
+func (h *Handler) reviewReport(w http.ResponseWriter, r *http.Request) {
+	reportID, err := strconv.ParseInt(chi.URLParam(r, "reportID"), 10, 64)
+	if err != nil || reportID <= 0 {
+		h.writeError(w, r, domain.ErrInvalidInput)
+		return
+	}
+	var input struct {
+		Status string `json:"status"`
+	}
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	report, err := h.service.ReviewVideoReport(r.Context(), sessionFrom(r.Context()).User.Username, reportID, input.Status)
+	if err != nil {
+		h.writeError(w, r, err)
+		return
+	}
+	writeJSON(w, r, http.StatusOK, report)
+}
+
 func (h *Handler) toggle(w http.ResponseWriter, r *http.Request, action func(context.Context, int64, int64) (bool, error)) {
 	id, ok := pathID(w, r)
 	if !ok {
@@ -531,6 +666,23 @@ func (h *Handler) createComment(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, r, http.StatusCreated, comment)
 }
 
+func (h *Handler) deleteComment(w http.ResponseWriter, r *http.Request) {
+	videoID, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	commentID, err := strconv.ParseInt(chi.URLParam(r, "commentID"), 10, 64)
+	if err != nil || commentID <= 0 {
+		writeProblem(w, r, http.StatusBadRequest, "无效的评论编号")
+		return
+	}
+	if err := h.service.DeleteComment(r.Context(), sessionFrom(r.Context()).User.ID, videoID, commentID); err != nil {
+		h.writeError(w, r, err)
+		return
+	}
+	writeJSON(w, r, http.StatusOK, map[string]bool{"deleted": true})
+}
+
 func (h *Handler) optionalSession(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cookie, err := r.Cookie(sessionCookie)
@@ -539,6 +691,18 @@ func (h *Handler) optionalSession(next http.Handler) http.Handler {
 			if authErr == nil {
 				r = r.WithContext(context.WithValue(r.Context(), sessionKey, session))
 			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (h *Handler) responseHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		if strings.HasPrefix(r.URL.Path, "/api/v1/auth/") ||
+			strings.HasPrefix(r.URL.Path, "/api/v1/me/") ||
+			strings.HasPrefix(r.URL.Path, "/api/v1/admin/") {
+			w.Header().Set("Cache-Control", "no-store")
 		}
 		next.ServeHTTP(w, r)
 	})
@@ -649,6 +813,10 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, target any) bool {
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {
 		writeProblem(w, r, http.StatusBadRequest, "请求内容不是有效的 JSON")
+		return false
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		writeProblem(w, r, http.StatusBadRequest, "请求内容只能包含一个 JSON 对象")
 		return false
 	}
 	return true

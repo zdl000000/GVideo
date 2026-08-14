@@ -2,15 +2,19 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 )
 
 type Config struct {
 	AppEnv                  string
 	HTTPAddr                string
+	FrontendURL             string
+	AdminUsername           string
 	DatabasePath            string
 	MediaDir                string
 	SessionTTL              time.Duration
@@ -27,6 +31,12 @@ type Config struct {
 }
 
 func Load() (Config, error) {
+	appEnv := strings.ToLower(env("APP_ENV", "development"))
+	frontendURL := env("FRONTEND_URL", "http://127.0.0.1:5173")
+	parsedFrontendURL, err := url.Parse(frontendURL)
+	if err != nil || (parsedFrontendURL.Scheme != "http" && parsedFrontendURL.Scheme != "https") || parsedFrontendURL.Host == "" || parsedFrontendURL.User != nil || (parsedFrontendURL.Path != "" && parsedFrontendURL.Path != "/") || parsedFrontendURL.RawQuery != "" || parsedFrontendURL.Fragment != "" {
+		return Config{}, fmt.Errorf("FRONTEND_URL must be an HTTP(S) origin without credentials, path, query, or fragment")
+	}
 	ttl, err := time.ParseDuration(env("SESSION_TTL", "168h"))
 	if err != nil {
 		return Config{}, fmt.Errorf("SESSION_TTL: %w", err)
@@ -38,6 +48,9 @@ func Load() (Config, error) {
 	secure, err := strconv.ParseBool(env("COOKIE_SECURE", "false"))
 	if err != nil {
 		return Config{}, fmt.Errorf("COOKIE_SECURE: %w", err)
+	}
+	if appEnv == "production" && (!secure || parsedFrontendURL.Scheme != "https") {
+		return Config{}, fmt.Errorf("production requires COOKIE_SECURE=true and an HTTPS FRONTEND_URL")
 	}
 	workerEnabled, err := strconv.ParseBool(env("MEDIA_WORKER_ENABLED", "true"))
 	if err != nil {
@@ -74,8 +87,10 @@ func Load() (Config, error) {
 	}
 
 	return Config{
-		AppEnv:                  env("APP_ENV", "development"),
+		AppEnv:                  appEnv,
 		HTTPAddr:                env("HTTP_ADDR", ":8080"),
+		FrontendURL:             strings.TrimSuffix(frontendURL, "/"),
+		AdminUsername:           env("ADMIN_USERNAME", ""),
 		DatabasePath:            databasePath,
 		MediaDir:                mediaDir,
 		SessionTTL:              ttl,

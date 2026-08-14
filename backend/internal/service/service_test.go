@@ -86,6 +86,117 @@ func TestRegisterLoginAndSession(t *testing.T) {
 	}
 }
 
+func TestChangePasswordKeepsCurrentSessionAndRevokesOthers(t *testing.T) {
+	dir := t.TempDir()
+	db, err := platform.OpenDatabase(filepath.Join(dir, "password.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	svc := New(repository.New(db), config.Config{SessionTTL: time.Hour, MediaDir: filepath.Join(dir, "media")}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	ctx := context.Background()
+	first, err := svc.Register(ctx, "password_owner", "password123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := svc.Login(ctx, "password_owner", "password123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.ChangePassword(ctx, first.User.ID, first.Token, "password123", "newpassword123"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Authenticate(ctx, second.Token); err != domain.ErrInvalidSession {
+		t.Fatalf("other session error = %v, want invalid session", err)
+	}
+	if _, err := svc.Authenticate(ctx, first.Token); err != nil {
+		t.Fatalf("current session was revoked: %v", err)
+	}
+	if _, err := svc.Login(ctx, "password_owner", "password123"); err != domain.ErrUnauthorized {
+		t.Fatalf("old password error = %v, want unauthorized", err)
+	}
+	if _, err := svc.Login(ctx, "password_owner", "newpassword123"); err != nil {
+		t.Fatalf("new password login: %v", err)
+	}
+}
+
+func TestReportVideoRulesAndUpsert(t *testing.T) {
+	dir := t.TempDir()
+	db, err := platform.OpenDatabase(filepath.Join(dir, "reports.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	repo := repository.New(db)
+	svc := New(repo, config.Config{SessionTTL: time.Hour, MediaDir: filepath.Join(dir, "media")}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	ctx := context.Background()
+	author, err := repo.CreateUser(ctx, "report_author", "hash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reporter, err := repo.CreateUser(ctx, "report_viewer", "hash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	video, err := repo.CreateVideo(ctx, domain.NewVideo{UserID: author.ID, Title: "Reportable video", Category: Categories[0], Visibility: "public", VideoPath: "videos/report.mp4", MimeType: "video/mp4", SizeBytes: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := svc.ReportVideo(ctx, reporter.ID, video.ID, "spam", "first detail")
+	if err != nil || report.Status != "pending" || report.Detail != "first detail" {
+		t.Fatalf("first report = %#v err=%v", report, err)
+	}
+	updated, err := svc.ReportVideo(ctx, reporter.ID, video.ID, "copyright", "updated detail")
+	if err != nil || updated.ID != report.ID || updated.Reason != "copyright" || updated.Detail != "updated detail" {
+		t.Fatalf("updated report = %#v err=%v", updated, err)
+	}
+	if _, err := svc.ReportVideo(ctx, author.ID, video.ID, "spam", "self report"); err != domain.ErrForbidden {
+		t.Fatalf("self report error = %v, want forbidden", err)
+	}
+	if _, err := svc.ReportVideo(ctx, reporter.ID, video.ID, "invalid", "bad reason"); err != domain.ErrInvalidInput {
+		t.Fatalf("invalid reason error = %v, want invalid input", err)
+	}
+}
+
+func TestAdminReportReviewAuthorization(t *testing.T) {
+	dir := t.TempDir()
+	db, err := platform.OpenDatabase(filepath.Join(dir, "admin-reports.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	repo := repository.New(db)
+	svc := New(repo, config.Config{AdminUsername: "review_admin", MediaDir: filepath.Join(dir, "media")}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	ctx := context.Background()
+	author, _ := repo.CreateUser(ctx, "admin_report_author", "hash")
+	reporter, _ := repo.CreateUser(ctx, "admin_report_viewer", "hash")
+	video, err := repo.CreateVideo(ctx, domain.NewVideo{UserID: author.ID, Title: "Review", Category: Categories[0], VideoPath: "videos/admin-review.mp4", MimeType: "video/mp4", SizeBytes: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := svc.ReportVideo(ctx, reporter.ID, video.ID, "other", "needs review")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.AdminVideoReports(ctx, "ordinary_user", "", 1, 20); err != domain.ErrForbidden {
+		t.Fatalf("ordinary list error = %v, want forbidden", err)
+	}
+	page, err := svc.AdminVideoReports(ctx, "REVIEW_ADMIN", "pending", 1, 20)
+	if err != nil || page.Total != 1 {
+		t.Fatalf("admin reports = %#v err=%v", page, err)
+	}
+	if _, err := svc.ReviewVideoReport(ctx, "ordinary_user", report.ID, "resolved"); err != domain.ErrForbidden {
+		t.Fatalf("ordinary review error = %v, want forbidden", err)
+	}
+	updated, err := svc.ReviewVideoReport(ctx, "review_admin", report.ID, "dismissed")
+	if err != nil || updated.Status != "dismissed" {
+		t.Fatalf("admin review = %#v err=%v", updated, err)
+	}
+	if _, err := svc.ReviewVideoReport(ctx, "review_admin", report.ID, "invalid"); err != domain.ErrInvalidInput {
+		t.Fatalf("invalid status error = %v, want invalid input", err)
+	}
+}
+
 func TestCreatorProfileAndFollowRules(t *testing.T) {
 	dir := t.TempDir()
 	db, err := platform.OpenDatabase(filepath.Join(dir, "test.db"))
@@ -122,6 +233,106 @@ func TestCreatorProfileAndFollowRules(t *testing.T) {
 	active, err = svc.ToggleFollow(ctx, follower.ID, followed.ID)
 	if err != nil || active {
 		t.Fatalf("unfollow user: active=%v err=%v", active, err)
+	}
+}
+
+func TestInteractionNotificationsAndSelfSuppression(t *testing.T) {
+	dir := t.TempDir()
+	db, err := platform.OpenDatabase(filepath.Join(dir, "notifications.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	repo := repository.New(db)
+	svc := New(repo, config.Config{MediaDir: filepath.Join(dir, "media")}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	ctx := context.Background()
+	owner, err := repo.CreateUser(ctx, "notification_owner", "hash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	actor, err := repo.CreateUser(ctx, "notification_actor", "hash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	video, err := repo.CreateVideo(ctx, domain.NewVideo{
+		UserID: owner.ID, Title: "Service notifications", Category: "knowledge",
+		VideoPath: "videos/service-notifications.mp4", MimeType: "video/mp4", SizeBytes: 10,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if active, err := svc.ToggleFollow(ctx, actor.ID, owner.ID); err != nil || !active {
+		t.Fatalf("follow: active=%v err=%v", active, err)
+	}
+	if active, err := svc.ToggleLike(ctx, actor.ID, video.ID); err != nil || !active {
+		t.Fatalf("like: active=%v err=%v", active, err)
+	}
+	if active, err := svc.ToggleFavorite(ctx, actor.ID, video.ID); err != nil || !active {
+		t.Fatalf("favorite: active=%v err=%v", active, err)
+	}
+	comment, err := svc.CreateComment(ctx, actor.ID, video.ID, "service notification comment")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := svc.Notifications(ctx, owner.ID, 1, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Total != 4 || page.UnreadCount != 4 {
+		t.Fatalf("notification totals = %#v, want four unread", page)
+	}
+	types := make(map[string]domain.Notification, len(page.Items))
+	for _, item := range page.Items {
+		types[item.Type] = item
+	}
+	for _, notificationType := range []string{"follow", "like", "favorite", "comment"} {
+		if _, ok := types[notificationType]; !ok {
+			t.Fatalf("missing %q notification in %#v", notificationType, page.Items)
+		}
+	}
+	if types["comment"].CommentID != comment.ID || types["comment"].CommentPreview != comment.Content {
+		t.Fatalf("comment notification = %#v", types["comment"])
+	}
+
+	if active, err := svc.ToggleFollow(ctx, actor.ID, owner.ID); err != nil || active {
+		t.Fatalf("unfollow: active=%v err=%v", active, err)
+	}
+	if active, err := svc.ToggleLike(ctx, actor.ID, video.ID); err != nil || active {
+		t.Fatalf("unlike: active=%v err=%v", active, err)
+	}
+	if active, err := svc.ToggleFavorite(ctx, actor.ID, video.ID); err != nil || active {
+		t.Fatalf("unfavorite: active=%v err=%v", active, err)
+	}
+	if _, err := svc.ToggleLike(ctx, owner.ID, video.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ToggleFavorite(ctx, owner.ID, video.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.CreateComment(ctx, owner.ID, video.ID, "owner comment"); err != nil {
+		t.Fatal(err)
+	}
+	page, err = svc.Notifications(ctx, owner.ID, 1, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Total != 4 {
+		t.Fatalf("toggle-off or self interaction created notifications: %#v", page.Items)
+	}
+
+	if err := svc.MarkNotificationRead(ctx, actor.ID, page.Items[0].ID); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("other user mark read error = %v, want not found", err)
+	}
+	if err := svc.MarkNotificationRead(ctx, owner.ID, page.Items[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.MarkAllNotificationsRead(ctx, owner.ID); err != nil {
+		t.Fatal(err)
+	}
+	page, err = svc.Notifications(ctx, owner.ID, 1, 20)
+	if err != nil || page.UnreadCount != 0 {
+		t.Fatalf("mark all result = %#v err=%v", page, err)
 	}
 }
 

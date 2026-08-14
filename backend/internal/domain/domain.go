@@ -15,6 +15,7 @@ var (
 	ErrSubtitleExists   = errors.New("subtitle already exists")
 	ErrVideoProcessing  = errors.New("video is processing")
 	ErrRetryUnavailable = errors.New("retry unavailable")
+	ErrReportExists     = errors.New("report already exists")
 )
 
 type User struct {
@@ -22,6 +23,7 @@ type User struct {
 	Username  string    `json:"username"`
 	Bio       string    `json:"bio"`
 	AvatarURL string    `json:"avatar_url"`
+	IsAdmin   bool      `json:"is_admin"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
@@ -41,6 +43,29 @@ type Session struct {
 	User      User
 	CSRFToken string
 	ExpiresAt time.Time
+}
+
+type VideoReport struct {
+	ID               int64     `json:"id"`
+	VideoID          int64     `json:"video_id"`
+	VideoTitle       string    `json:"video_title,omitempty"`
+	VideoAuthorID    int64     `json:"video_author_id,omitempty"`
+	VideoAuthor      string    `json:"video_author,omitempty"`
+	UserID           int64     `json:"user_id"`
+	ReporterUsername string    `json:"reporter_username,omitempty"`
+	Reason           string    `json:"reason"`
+	Detail           string    `json:"detail"`
+	Status           string    `json:"status"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
+}
+
+type VideoReportPage struct {
+	Items    []VideoReport `json:"items"`
+	Page     int           `json:"page"`
+	PageSize int           `json:"page_size"`
+	Total    int64         `json:"total"`
+	HasNext  bool          `json:"has_next"`
 }
 
 type Video struct {
@@ -125,6 +150,7 @@ type VideoFilter struct {
 	Sort             string
 	UserID           int64
 	FollowingUserID  int64
+	FavoriteUserID   int64
 	IncludeNonPublic bool
 	Limit            int
 	Offset           int
@@ -191,4 +217,27 @@ type NewSubtitle struct {
 	Label     string
 	Path      string
 	IsDefault bool
+}
+
+type Notification struct {
+	ID             int64      `json:"id"`
+	Type           string     `json:"type"`
+	ActorID        int64      `json:"actor_id,omitempty"`
+	ActorUsername  string     `json:"actor_username,omitempty"`
+	ActorAvatarURL string     `json:"actor_avatar_url,omitempty"`
+	VideoID        int64      `json:"video_id,omitempty"`
+	VideoTitle     string     `json:"video_title,omitempty"`
+	CommentID      int64      `json:"comment_id,omitempty"`
+	CommentPreview string     `json:"comment_preview,omitempty"`
+	ReadAt         *time.Time `json:"read_at,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+}
+
+type NotificationPage struct {
+	Items       []Notification `json:"items"`
+	Page        int            `json:"page"`
+	PageSize    int            `json:"page_size"`
+	Total       int64          `json:"total"`
+	HasNext     bool           `json:"has_next"`
+	UnreadCount int64          `json:"unread_count"`
 }

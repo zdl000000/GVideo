@@ -1,6 +1,19 @@
+map $uri $gvideo_auth_limit_key {
+    default "";
+    ~^/api/v1/auth/(login|register)$ $binary_remote_addr;
+}
+
+map "$request_method:$uri" $gvideo_upload_limit_key {
+    default "";
+    "POST:/api/v1/videos" $binary_remote_addr;
+}
+
+limit_req_zone $gvideo_auth_limit_key zone=gvideo_auth:10m rate=10r/m;
+limit_req_zone $gvideo_upload_limit_key zone=gvideo_upload:10m rate=2r/m;
+
 server {
     listen 80;
-    server_name _;
+    server_name ${GVIDEO_HOST};
 
     location = /gateway-healthz {
         access_log off;
@@ -9,14 +22,17 @@ server {
     }
 
     location / {
-        return 308 https://$host${HTTPS_REDIRECT_PORT_SUFFIX}$request_uri;
+        return 308 https://${GVIDEO_HOST}${HTTPS_REDIRECT_PORT_SUFFIX}$request_uri;
     }
 }
 
 server {
     listen 443 ssl;
-    server_name _;
+    server_name ${GVIDEO_HOST};
     client_max_body_size 524m;
+    limit_req_status 429;
+    limit_req zone=gvideo_auth burst=10 nodelay;
+    limit_req zone=gvideo_upload burst=3 nodelay;
 
     ssl_certificate /etc/nginx/tls/fullchain.pem;
     ssl_certificate_key /etc/nginx/tls/privkey.pem;
@@ -24,6 +40,7 @@ server {
     ssl_session_cache shared:GVIDEO_TLS:10m;
     ssl_session_timeout 1d;
     ssl_session_tickets off;
+    add_header Strict-Transport-Security "max-age=86400" always;
 
     location = /gateway-healthz {
         access_log off;

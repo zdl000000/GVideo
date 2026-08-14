@@ -3,10 +3,11 @@ export interface User {
   username: string;
   bio: string;
   avatar_url: string;
+  is_admin: boolean;
   created_at: string;
 }
 
-export interface CreatorProfile extends User {
+export interface CreatorProfile extends Omit<User, "is_admin"> {
   followers_count: number;
   following_count: number;
   videos_count: number;
@@ -64,6 +65,31 @@ export interface VideoPage {
   has_next: boolean;
 }
 
+export type VideoReportStatus = "pending" | "reviewed" | "resolved" | "dismissed";
+
+export interface VideoReport {
+  id: number;
+  video_id: number;
+  video_title: string;
+  video_author_id: number;
+  video_author: string;
+  user_id: number;
+  reporter_username: string;
+  reason: string;
+  detail: string;
+  status: VideoReportStatus;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface VideoReportPage {
+  items: VideoReport[];
+  page: number;
+  page_size: number;
+  total: number;
+  has_next: boolean;
+}
+
 export interface Comment {
   id: number;
   video_id: number;
@@ -91,4 +117,27 @@ export interface CreatorStats {
 export interface AuthPayload {
   user: User;
   csrf_token: string;
+}
+
+export interface Notification {
+  id: number;
+  type: "follow" | "like" | "favorite" | "comment" | "processing_ready" | "processing_failed";
+  actor_id?: number;
+  actor_username?: string;
+  actor_avatar_url?: string;
+  video_id?: number;
+  video_title?: string;
+  comment_id?: number;
+  comment_preview?: string;
+  read_at?: string;
+  created_at: string;
+}
+
+export interface NotificationPage {
+  items: Notification[];
+  page: number;
+  page_size: number;
+  total: number;
+  has_next: boolean;
+  unread_count: number;
 }

@@ -14,28 +14,30 @@ import (
 )
 
 type DatabaseStats struct {
-	Users     int64
-	Sessions  int64
-	Videos    int64
-	Subtitles int64
-	Comments  int64
-	Likes     int64
-	Favorites int64
-	Follows   int64
-	MediaJobs int64
+	Users         int64
+	Sessions      int64
+	Videos        int64
+	Subtitles     int64
+	Comments      int64
+	Likes         int64
+	Favorites     int64
+	Follows       int64
+	MediaJobs     int64
+	Notifications int64
 }
 
 type MergeStats struct {
-	Users        int64
-	RenamedUsers int64
-	Sessions     int64
-	Videos       int64
-	Subtitles    int64
-	Comments     int64
-	Likes        int64
-	Favorites    int64
-	Follows      int64
-	MediaJobs    int64
+	Users         int64
+	RenamedUsers  int64
+	Sessions      int64
+	Videos        int64
+	Subtitles     int64
+	Comments      int64
+	Likes         int64
+	Favorites     int64
+	Follows       int64
+	MediaJobs     int64
+	Notifications int64
 }
 
 func OpenDatabase(path string) (*sql.DB, error) {
@@ -165,6 +167,34 @@ CREATE TABLE IF NOT EXISTS comments (
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_comments_video_id ON comments(video_id, created_at DESC);
+CREATE TABLE IF NOT EXISTS video_reports (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  video_id INTEGER NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  reason TEXT NOT NULL CHECK (reason IN ('spam', 'inappropriate', 'copyright', 'other')),
+  detail TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'reviewed', 'resolved', 'dismissed')),
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(video_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_video_reports_status ON video_reports(status, updated_at DESC);
+CREATE TABLE IF NOT EXISTS notifications (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  recipient_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  actor_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+	actor_username TEXT NOT NULL DEFAULT '',
+	actor_avatar_path TEXT NOT NULL DEFAULT '',
+  type TEXT NOT NULL CHECK (type IN ('follow', 'like', 'favorite', 'comment', 'processing_ready', 'processing_failed')),
+  video_id INTEGER REFERENCES videos(id) ON DELETE SET NULL,
+  video_title TEXT NOT NULL DEFAULT '',
+  comment_id INTEGER REFERENCES comments(id) ON DELETE SET NULL,
+  comment_preview TEXT NOT NULL DEFAULT '',
+  read_at DATETIME,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_notifications_recipient_created ON notifications(recipient_id, created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_notifications_unread ON notifications(recipient_id, read_at);
 CREATE TABLE IF NOT EXISTS transcoding_jobs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   video_id INTEGER NOT NULL UNIQUE REFERENCES videos(id) ON DELETE CASCADE,
@@ -200,6 +230,8 @@ CREATE INDEX IF NOT EXISTS idx_transcoding_jobs_claim ON transcoding_jobs(status
 		{"videos", "audio_codec", "TEXT NOT NULL DEFAULT ''"},
 		{"videos", "processing_error", "TEXT NOT NULL DEFAULT ''"},
 		{"videos", "processed_at", "DATETIME"},
+		{"notifications", "actor_username", "TEXT NOT NULL DEFAULT ''"},
+		{"notifications", "actor_avatar_path", "TEXT NOT NULL DEFAULT ''"},
 	}
 	addedColumns := make(map[string]bool)
 	for _, column := range columns {
@@ -272,6 +304,7 @@ func ReadDatabaseStats(ctx context.Context, db *sql.DB) (DatabaseStats, error) {
 		{"video_favorites", nil},
 		{"user_follows", nil},
 		{"transcoding_jobs", nil},
+		{"notifications", nil},
 	}
 	var stats DatabaseStats
 	queries[0].target = &stats.Users
@@ -283,6 +316,7 @@ func ReadDatabaseStats(ctx context.Context, db *sql.DB) (DatabaseStats, error) {
 	queries[6].target = &stats.Favorites
 	queries[7].target = &stats.Follows
 	queries[8].target = &stats.MediaJobs
+	queries[9].target = &stats.Notifications
 	for _, query := range queries {
 		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+query.name).Scan(query.target); err != nil {
 			return DatabaseStats{}, fmt.Errorf("count %s: %w", query.name, err)
@@ -681,6 +715,24 @@ END`
 	if err != nil {
 		return MergeStats{}, fmt.Errorf("inspect source transcoding jobs table: %w", err)
 	}
+	sourceHasNotifications, err := databaseTableExists(ctx, tx, "source_db", "notifications")
+	if err != nil {
+		return MergeStats{}, fmt.Errorf("inspect source notifications table: %w", err)
+	}
+	sourceNotificationActorUsername := "''"
+	sourceNotificationActorAvatar := "''"
+	if sourceHasNotifications {
+		if exists, err := databaseColumnExists(ctx, tx, "source_db", "notifications", "actor_username"); err != nil {
+			return MergeStats{}, fmt.Errorf("inspect source notification actor username: %w", err)
+		} else if exists {
+			sourceNotificationActorUsername = "sn.actor_username"
+		}
+		if exists, err := databaseColumnExists(ctx, tx, "source_db", "notifications", "actor_avatar_path"); err != nil {
+			return MergeStats{}, fmt.Errorf("inspect source notification actor avatar: %w", err)
+		} else if exists {
+			sourceNotificationActorAvatar = "sn.actor_avatar_path"
+		}
+	}
 
 	statements := []struct {
 		name  string
@@ -732,6 +784,27 @@ WHERE NOT EXISTS (SELECT 1 FROM comments existing
 SELECT v.id, j.status, j.attempts, j.last_error, j.available_at, j.started_at, j.finished_at, j.created_at, j.updated_at
 FROM source_db.transcoding_jobs j
 JOIN source_db.videos sv ON sv.id = j.video_id JOIN videos v ON v.video_path = sv.video_path`},
+		{"notifications", fmt.Sprintf(`INSERT INTO notifications(
+  recipient_id, actor_id, actor_username, actor_avatar_path, type, video_id, video_title,
+  comment_id, comment_preview, read_at, created_at)
+SELECT recipient.target_id, actor.target_id, %s, %s, sn.type, v.id, sn.video_title,
+       mapped_comment.id, sn.comment_preview, sn.read_at, sn.created_at
+FROM source_db.notifications sn
+JOIN merge_user_map recipient ON recipient.source_id = sn.recipient_id
+LEFT JOIN merge_user_map actor ON actor.source_id = sn.actor_id
+LEFT JOIN source_db.videos sv ON sv.id = sn.video_id
+LEFT JOIN videos v ON v.video_path = sv.video_path
+LEFT JOIN source_db.comments sc ON sc.id = sn.comment_id
+LEFT JOIN comments mapped_comment ON mapped_comment.video_id = v.id
+  AND mapped_comment.user_id = (SELECT target_id FROM merge_user_map WHERE source_id = sc.user_id)
+  AND mapped_comment.content = sc.content AND mapped_comment.created_at = sc.created_at
+WHERE NOT EXISTS (SELECT 1 FROM notifications existing
+  WHERE existing.recipient_id = recipient.target_id AND existing.type = sn.type
+    AND existing.created_at = sn.created_at
+    AND COALESCE(existing.actor_id, 0) = COALESCE(actor.target_id, 0)
+    AND COALESCE(existing.video_id, 0) = COALESCE(v.id, 0)
+    AND COALESCE(existing.comment_id, 0) = COALESCE(mapped_comment.id, 0)
+    AND COALESCE(existing.comment_preview, '') = COALESCE(sn.comment_preview, ''))`, sourceNotificationActorUsername, sourceNotificationActorAvatar)},
 	}
 	if !sourceHasSubtitles {
 		statements = append(statements[:2], statements[3:]...)
@@ -747,6 +820,14 @@ JOIN source_db.videos sv ON sv.id = j.video_id JOIN videos v ON v.video_path = s
 	if !sourceHasTranscodingJobs {
 		for index, statement := range statements {
 			if statement.name == "media_jobs" {
+				statements = append(statements[:index], statements[index+1:]...)
+				break
+			}
+		}
+	}
+	if !sourceHasNotifications {
+		for index, statement := range statements {
+			if statement.name == "notifications" {
 				statements = append(statements[:index], statements[index+1:]...)
 				break
 			}
@@ -782,6 +863,8 @@ JOIN source_db.videos sv ON sv.id = j.video_id JOIN videos v ON v.video_path = s
 			stats.Follows = changed
 		case "media_jobs":
 			stats.MediaJobs = changed
+		case "notifications":
+			stats.Notifications = changed
 		}
 	}
 	if err := tx.Commit(); err != nil {

@@ -51,6 +51,7 @@ func main() {
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      15 * time.Minute,
 		IdleTimeout:       90 * time.Second,
+		MaxHeaderBytes:    64 << 10,
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -97,9 +98,9 @@ func runDataCommand(ctx context.Context, cfg config.Config, args []string) error
 		if err != nil {
 			return err
 		}
-		fmt.Printf("integrity=ok\nmedia=%s\nusers=%d\nsessions=%d\nvideos=%d\nsubtitles=%d\ncomments=%d\nlikes=%d\nfavorites=%d\nfollows=%d\nmedia_jobs=%d\n",
+		fmt.Printf("integrity=ok\nmedia=%s\nusers=%d\nsessions=%d\nvideos=%d\nsubtitles=%d\ncomments=%d\nlikes=%d\nfavorites=%d\nfollows=%d\nmedia_jobs=%d\nnotifications=%d\n",
 			map[bool]string{true: "ok", false: "not-checked"}[args[0] == "data-verify-media"],
-			stats.Users, stats.Sessions, stats.Videos, stats.Subtitles, stats.Comments, stats.Likes, stats.Favorites, stats.Follows, stats.MediaJobs)
+			stats.Users, stats.Sessions, stats.Videos, stats.Subtitles, stats.Comments, stats.Likes, stats.Favorites, stats.Follows, stats.MediaJobs, stats.Notifications)
 		return nil
 	}
 
@@ -115,8 +116,8 @@ func runDataCommand(ctx context.Context, cfg config.Config, args []string) error
 		if err != nil {
 			return err
 		}
-		fmt.Printf("database=%s\nusers=%d\nsessions=%d\nvideos=%d\nsubtitles=%d\ncomments=%d\nlikes=%d\nfavorites=%d\nfollows=%d\nmedia_jobs=%d\n",
-			cfg.DatabasePath, stats.Users, stats.Sessions, stats.Videos, stats.Subtitles, stats.Comments, stats.Likes, stats.Favorites, stats.Follows, stats.MediaJobs)
+		fmt.Printf("database=%s\nusers=%d\nsessions=%d\nvideos=%d\nsubtitles=%d\ncomments=%d\nlikes=%d\nfavorites=%d\nfollows=%d\nmedia_jobs=%d\nnotifications=%d\n",
+			cfg.DatabasePath, stats.Users, stats.Sessions, stats.Videos, stats.Subtitles, stats.Comments, stats.Likes, stats.Favorites, stats.Follows, stats.MediaJobs, stats.Notifications)
 		return nil
 	case "data-backup":
 		if len(args) != 2 {
@@ -135,8 +136,8 @@ func runDataCommand(ctx context.Context, cfg config.Config, args []string) error
 		if err != nil {
 			return err
 		}
-		fmt.Printf("users_added=%d\nusers_renamed=%d\nsessions_added=%d\nvideos_added=%d\ncomments_added=%d\nlikes_added=%d\nfavorites_added=%d\nfollows_added=%d\nmedia_jobs_added=%d\n",
-			stats.Users, stats.RenamedUsers, stats.Sessions, stats.Videos, stats.Comments, stats.Likes, stats.Favorites, stats.Follows, stats.MediaJobs)
+		fmt.Printf("users_added=%d\nusers_renamed=%d\nsessions_added=%d\nvideos_added=%d\ncomments_added=%d\nlikes_added=%d\nfavorites_added=%d\nfollows_added=%d\nmedia_jobs_added=%d\nnotifications_added=%d\n",
+			stats.Users, stats.RenamedUsers, stats.Sessions, stats.Videos, stats.Comments, stats.Likes, stats.Favorites, stats.Follows, stats.MediaJobs, stats.Notifications)
 		return nil
 	default:
 		return fmt.Errorf("unknown command %q; use data-status, data-backup, data-verify, data-verify-media, or data-merge", args[0])

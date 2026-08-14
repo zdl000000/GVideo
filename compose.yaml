@@ -6,8 +6,10 @@ services:
         IMAGE_REGISTRY: ${DOCKER_IMAGE_REGISTRY:-dockerproxy.net}
         GOPROXY: ${GOPROXY:-https://goproxy.cn,direct}
     environment:
-      APP_ENV: production
+      APP_ENV: development
       HTTP_ADDR: :8080
+      FRONTEND_URL: ${FRONTEND_URL:-http://127.0.0.1:8088}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-}
       DATABASE_PATH: /app/data/gvideo.db
       MEDIA_DIR: /app/media
       SESSION_TTL: 168h
@@ -32,6 +34,7 @@ services:
       interval: 10s
       timeout: 3s
       retries: 5
+      start_period: 10s
 
   frontend:
     build:
@@ -49,7 +52,10 @@ services:
       interval: 10s
       timeout: 3s
       retries: 5
+      start_period: 5s
 
 volumes:
   gvideo-data:
+    name: ${GVIDEO_DATA_VOLUME:-gvideo_gvideo-data}
   gvideo-media:
+    name: ${GVIDEO_MEDIA_VOLUME:-gvideo_gvideo-media}
