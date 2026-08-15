@@ -115,9 +115,9 @@ scripts/                  开发、检查、验收、备份和恢复脚本
 - [运维、验收与备份恢复](docs/operations.md)
 - [前端设计系统](docs/design-system.md)
 - [项目专项开发规范](docs/project-standards.md)
-- [当前实施计划](docs/implementation-plan.md)
-- [贡献指南](CONTRIBUTING.md)
-- [安全策略](SECURITY.md)
+- [公开开发路线](docs/roadmap.md)
+- [贡献指南](.github/CONTRIBUTING.md)
+- [安全策略](.github/SECURITY.md)
 - [变更记录](CHANGELOG.md)
 
 ## 安全提示
@@ -125,7 +125,7 @@ scripts/                  开发、检查、验收、备份和恢复脚本
 - 不要提交 `.env`、证书、私钥、数据库、媒体、备份、日志或临时隧道状态。
 - 生产环境必须使用 HTTPS 并设置 `COOKIE_SECURE=true`。
 - 不要运行 `docker compose down -v`，除非明确需要永久删除数据库和媒体卷。
-- 安全漏洞请按 [SECURITY.md](SECURITY.md) 私下报告，不要提交公开 Issue。
+- 安全漏洞请按 [安全策略](.github/SECURITY.md) 私下报告，不要提交公开 Issue。
 
 ## 许可证
 

@@ -4,7 +4,7 @@
 
 ## 开始之前
 
-1. 阅读 [架构说明](docs/architecture.md) 与 [项目专项开发规范](docs/project-standards.md)。
+1. 阅读 [架构说明](../docs/architecture.md) 与 [项目专项开发规范](../docs/project-standards.md)。
 2. 提交新 Issue 前先检索已有问题。
 3. 涉及行为、数据库、认证、安全或部署的大改动，请先通过 Issue 讨论。
 4. 不要提交凭证、本机数据库、上传媒体、备份、构建产物、日志或 Cloudflare 隧道状态。

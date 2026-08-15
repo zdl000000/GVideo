@@ -2,7 +2,7 @@
 
 GVideo 的重要变更记录在此。项目在首次正式发布后遵循语义化版本，并参考 Keep a Changelog 的组织方式。
 
-## 未发布
+## [未发布]
 
 ### 新增
 
@@ -20,4 +20,4 @@ GVideo 的重要变更记录在此。项目在首次正式发布后遵循语义�
 
 - 服务端 Session、Secure Cookie 支持、CSRF、防伪造上传类型和按可见性鉴权的媒体访问。
 
-GitHub 仓库地址确定后，再为“未发布”版本补充对应比较链接。
+[未发布]: https://github.com/zdl000000/GVideo/commits/main
