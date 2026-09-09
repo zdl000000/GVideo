@@ -111,6 +111,7 @@ scripts/                  开发、检查、验收、备份和恢复脚本
 ## 文档导航
 
 - [架构与 Feature-first 迁移](docs/architecture.md)
+- [开发交接与原子任务清单](docs/development-handoff.md)
 - [部署与配置](docs/deployment.md)
 - [运维、验收与备份恢复](docs/operations.md)
 - [前端设计系统](docs/design-system.md)
