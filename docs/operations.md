@@ -10,6 +10,22 @@
 
 检查内容包括 PowerShell 语法、Docker Compose 配置、Go 格式与测试、`go vet`、Vitest、TypeScript 类型检查、Vite 生产构建和 `git diff --check`。
 
+## 管理诊断端点
+
+指标和 pprof 默认关闭，分别由 `METRICS_ADDR`、`PPROF_ADDR` 独立启用。只绑定 loopback 或可信管理网络；不要通过面向用户的 Nginx/公网入口代理这些端点。
+
+```powershell
+$env:METRICS_ADDR = "127.0.0.1:9090"
+$env:PPROF_ADDR = "127.0.0.1:6060" # 仅在限时排障时启用
+cd backend
+go run ./cmd/server
+```
+
+- 指标：`http://127.0.0.1:9090/metrics`
+- pprof：`http://127.0.0.1:6060/debug/pprof/`
+
+采集系统如在容器或远端网络，应使用隔离管理网络和来源 ACL，而不是把端口发布到 `0.0.0.0`。排障完成后清空 `PPROF_ADDR` 并重启服务。
+
 ## 完整验收
 
 首次运行浏览器验收前安装 Chromium：
@@ -140,3 +156,56 @@ go mod download
 - 不要把数据库、媒体、备份、证书、日志或隧道状态加入 Git。
 - 恢复验证只能使用脚本创建的隔离目录或临时卷。
 - 任何迁移和高风险运维操作前都应先创建并验证备份。
+
+## 版本回退与真实命名卷恢复
+
+应用回滚和数据恢复必须分开决策。仅当新版本没有写入不兼容数据时，才可只回退应用镜像；数据库或媒体已损坏、迁移失败或需要恢复到既定时间点时，使用已验证备份恢复。开始前记录当前 Git 提交、镜像标签、备份路径和事故时间线，并停止外部写入。
+
+### 回退应用版本
+
+1. 选择最后一个通过验收的 Git 提交或不可变镜像标签，不要使用浮动 `latest`。
+2. 保留现有命名卷，只重建应用容器：
+
+```powershell
+git checkout <last-known-good-commit>
+docker compose build backend frontend
+docker compose up -d --no-deps --force-recreate backend frontend
+docker compose ps
+docker compose logs --tail 150 backend frontend
+```
+
+3. 验证 `http://127.0.0.1:8080/healthz`、`http://127.0.0.1:8088/healthz`，再运行 `./scripts/acceptance-api.ps1`。若旧版本拒绝当前迁移账本或接口验收失败，停止服务，不要反复重启或修改迁移记录，改走备份恢复。
+
+### 恢复真实命名卷
+
+默认真实卷为 `gvideo_gvideo-data` 和 `gvideo_gvideo-media`（可分别由 `GVIDEO_DATA_VOLUME`、`GVIDEO_MEDIA_VOLUME` 覆盖）。这是破坏性操作：会用备份内容替换当前数据。先保留故障现场备份，并确认目标备份已通过 `verify-backup.ps1` 的校验和隔离恢复验证；若要重新创建备份并演练完整链路，另行运行无 `-Backup` 参数的 `backup-restore-drill.ps1`。
+
+```powershell
+$backup = Resolve-Path .\backups\gvideo-<timestamp>
+.\scripts\verify-backup.ps1 -Backup $backup
+.\scripts\backup-data.ps1 # 保存当前故障现场；失败时停止并人工评估
+
+docker compose down
+$env:GVIDEO_DATA_VOLUME = "gvideo_gvideo-data"
+$env:GVIDEO_MEDIA_VOLUME = "gvideo_gvideo-media"
+```
+
+随后由值班人员在维护窗口内使用一次性容器清空并恢复这两个**已核对名称**的卷。不要运行 `docker compose down -v`，不要把命令中的卷名替换为未经 `docker volume inspect` 确认的值：
+
+```powershell
+docker volume inspect $env:GVIDEO_DATA_VOLUME
+docker volume inspect $env:GVIDEO_MEDIA_VOLUME
+
+docker run --rm -v "${env:GVIDEO_DATA_VOLUME}:/restore" alpine:3.22 sh -c "rm -rf /restore/* /restore/.[!.]* /restore/..?*; mkdir -p /restore"
+docker run --rm -v "${env:GVIDEO_DATA_VOLUME}:/restore" -v "${backup}:/backup:ro" alpine:3.22 sh -c "cp /backup/database.db /restore/gvideo.db"
+docker run --rm -v "${env:GVIDEO_MEDIA_VOLUME}:/restore" alpine:3.22 sh -c "rm -rf /restore/* /restore/.[!.]* /restore/..?*; mkdir -p /restore"
+docker run --rm -v "${env:GVIDEO_MEDIA_VOLUME}:/restore" -v "${backup}:/backup:ro" alpine:3.22 sh -c "tar -xzf /backup/media.tar.gz -C /restore"
+
+docker compose up -d
+docker compose ps
+docker compose logs --tail 150 backend frontend
+.\scripts\data-status.ps1
+.\scripts\acceptance-api.ps1
+```
+
+恢复后必须确认双健康检查、迁移账本可打开、记录统计与备份清单一致、媒体引用可读取，并抽查登录、播放、Range/HLS 与一次受控上传。任一步失败时立即重新停止服务，保留容器日志和恢复现场；不要在真实卷上手工改表、删除 `schema_migrations` 或重复覆盖。回到隔离演练复现问题，必要时选择更早且已验证的备份，再由负责人批准第二次恢复。

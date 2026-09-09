@@ -31,11 +31,10 @@ Feature-first 是代码组织方式，不等于微服务。GVideo 在出现真�
 ```text
 frontend/src/
   app/App.tsx
-  features/captions/
+  features/             按 auth、watch、videos、creator 等能力组织
   shared/api/
+  shared/components/
   shared/lib/
-  App.tsx              兼容出口
-  api.ts               兼容出口
   types.ts
   styles.css
 
@@ -134,21 +133,21 @@ cmd/server -> modules -> shared/platform
 3. 优先迁移已有测试覆盖且边界明确的功能，字幕和评论排在前列。
 4. 后端先在现有包内按职责拆文件，降低大文件耦合和 Go 包循环风险。
 5. 只有当 Handler、Service、Repository 契约和测试能一起移动时，才提升为 `internal/modules/<feature>`。
-6. 所有调用方完成迁移并通过完整验收后，才删除兼容出口。
+6. 所有调用方完成迁移并通过完整验收后，才删除旧入口或重复实现。
 
 新功能遵循目标结构；已有功能在被修改或大文件明显影响维护时顺手迁移，不做一次性全仓重写。
 
-## 首批已落地边界
+## 已落地边界
 
-- 应用组合迁入 `frontend/src/app/App.tsx`，根 `App.tsx` 保留兼容出口。
-- HTTP 客户端迁入 `frontend/src/shared/api/client.ts`，根 `api.ts` 保留兼容出口。
-- 通用错误文案函数迁入 `frontend/src/shared/lib/errors.ts`。
-- 字幕管理 UI 迁入 `frontend/src/features/captions/SubtitleManager.tsx`。
+- 应用组合位于 `frontend/src/app/App.tsx`，页面按功能拆入 `frontend/src/features/`。
+- HTTP 客户端位于 `frontend/src/shared/api/client.ts`，通用组件和工具位于 `shared/`。
+- Handler、Service、Repository 已在现有 Go 包内按职责拆文件，尚未提升为独立业务包。
 - 字幕管理入口和位置保持不变，仍只属于 `/me/videos` 投稿管理。
+- 指标、pprof 使用独立且默认关闭的管理监听端口；SQLite 使用迁移账本记录版本和校验和。
 
-## 初次开源发布保护区
+## 架构保护区
 
-以下区域不在首轮重写范围：
+以下区域不得在无独立任务、聚焦测试和回滚方案时改动：
 
 - SQLite 兼容迁移、数据库合并和备份恢复。
 - FFprobe、FFmpeg、HLS 发布和媒体任务恢复。

@@ -10,6 +10,8 @@
 | --- | --- | --- |
 | `APP_ENV` | `development` | 运行环境标识 |
 | `HTTP_ADDR` | `:8080` | 后端监听地址 |
+| `METRICS_ADDR` | 空 | Prometheus 管理端监听地址；默认关闭，只允许绑定 loopback 或可信管理网络 |
+| `PPROF_ADDR` | 空 | Go pprof 管理端监听地址；默认关闭，不得暴露公网 |
 | `FRONTEND_URL` | `http://127.0.0.1:5173` | 前端公开入口，必须是无路径 Origin |
 | `ADMIN_USERNAME` | 空 | 指定现有用户名为管理员，大小写不敏感 |
 | `DATABASE_PATH` | `./data/gvideo.db` | SQLite 数据库路径 |
@@ -34,6 +36,10 @@
 | `TLS_KEY_FILE` | 无 | 仓库外私钥绝对路径 |
 
 真实密钥、证书、数据库和媒体不能进入 Git。
+
+backend 容器设置 `stop_grace_period: 30s`，长于应用的 15 秒优雅关闭超时。收到停止信号后 HTTP 与管理端口先停止接收请求，媒体 Worker 通过同一取消上下文退出；若转码子进程未及时响应取消，Docker 会在 30 秒宽限期结束后强制终止容器。
+
+`METRICS_ADDR` 与 `PPROF_ADDR` 是两个独立管理端口，均默认关闭。需要诊断时应绑定到 `127.0.0.1` 或隔离的可信管理网络，并由防火墙限制来源；反向代理不得公开 `/metrics` 或 `/debug/pprof/`。pprof 会暴露运行时与请求行为信息，仅在限时排障窗口启用，用完即关闭。
 
 ## Windows 开发环境
 
