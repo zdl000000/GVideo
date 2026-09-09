@@ -119,7 +119,7 @@
 2. `GUARD-02`：已完成（2026-09-10）。`frontend/src/shared` 的生产模块由静态测试禁止反向导入 `features` 或 `app`；目标测试与 TypeScript 类型检查已通过。
 3. `CONTRACT-01`：已完成（2026-09-10）。`docs/api-error-contract.md` 已冻结目标成功/错误 envelope、稳定错误码、request ID 与兼容性规则；契约测试只验证规格模型和错误码注册表，未修改生产 Handler、Service 或现有 API 行为。
 4. `CONTRACT-02`：已完成（2026-09-10）。`docs/auth-api-contract.md` 已冻结注册、登录、登出和当前会话的请求/响应、Cookie、CSRF、安全及稳定错误码；契约测试只验证规格注册表和 JSON 模型，未修改生产 Handler、Service 或现有 API 行为。
-5. `DB-01`：补空库、历史库、迁移失败回滚和未知版本测试夹具。
+5. `DB-01`：已完成（2026-09-10）。新增冻结历史库 SQL 夹具及空库初始化、历史库升级、迁移失败事务回滚与重试、未来未知版本拒绝且零修改测试；未修改生产迁移代码或业务表结构。
 6. `DB-02`：建立迁移前备份门禁；不得在同一任务中改业务表结构。
 7. `MODULE-01`：选择低风险业务模块，按 Handler → Service → Repository → tests 的纵向切片迁移；一次只迁一个模块。
 8. `FE-PERF-01`：单独评估 HLS chunk 预算和 Vitest 文件级并行恢复。
