@@ -1,7 +1,7 @@
 # API 错误响应契约
 
-> 状态：目标契约（CONTRACT-01）  
-> 适用范围：`/api/v1/**` JSON 响应  
+> 状态：目标契约（CONTRACT-01）
+> 适用范围：`/api/v1/**` JSON 响应
 > 本任务只冻结规格与契约测试；现有 Handler 的迁移由后续独立任务完成。
 
 ## 1. Envelope
