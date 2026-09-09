@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"reflect"
 	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -48,22 +49,35 @@ type contractSuccessEnvelope struct {
 
 func TestErrorContractRegistry(t *testing.T) {
 	codePattern := regexp.MustCompile(`^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$`)
-	seen := make(map[string]struct{}, len(errorContractRegistry))
+	got := make(map[string]int, len(errorContractRegistry))
 
 	for _, entry := range errorContractRegistry {
-		entry := entry
-		t.Run(entry.Code, func(t *testing.T) {
-			if !codePattern.MatchString(entry.Code) {
-				t.Fatalf("code %q is not lower snake_case", entry.Code)
-			}
-			if _, exists := seen[entry.Code]; exists {
-				t.Fatalf("duplicate error code %q", entry.Code)
-			}
-			seen[entry.Code] = struct{}{}
-			if entry.Status < 400 || entry.Status > 599 {
-				t.Fatalf("error code %q has non-error HTTP status %d", entry.Code, entry.Status)
-			}
-		})
+		if !codePattern.MatchString(entry.Code) {
+			t.Fatalf("code %q is not lower snake_case", entry.Code)
+		}
+		if _, exists := got[entry.Code]; exists {
+			t.Fatalf("duplicate error code %q", entry.Code)
+		}
+		got[entry.Code] = entry.Status
+	}
+
+	want := map[string]int{
+		"authentication_required": http.StatusUnauthorized,
+		"conflict":                http.StatusConflict,
+		"csrf_failed":             http.StatusForbidden,
+		"forbidden":               http.StatusForbidden,
+		"internal_error":          http.StatusInternalServerError,
+		"invalid_credentials":     http.StatusUnauthorized,
+		"invalid_input":           http.StatusBadRequest,
+		"invalid_request":         http.StatusBadRequest,
+		"not_found":               http.StatusNotFound,
+		"report_exists":           http.StatusConflict,
+		"retry_unavailable":       http.StatusConflict,
+		"subtitle_exists":         http.StatusConflict,
+		"video_processing":        http.StatusConflict,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("error contract registry mismatch\n got: %#v\nwant: %#v", got, want)
 	}
 }
 
@@ -121,4 +135,51 @@ func TestSuccessContractEnvelopeShape(t *testing.T) {
 	if _, exists := got["error"]; exists {
 		t.Fatal("success envelope must not contain error")
 	}
+}
+
+func TestRequestIDContract(t *testing.T) {
+	valid := []string{
+		"a",
+		"4e1d7d8d913e45869055b94e",
+		"trace.v1:edge-01_request",
+		strings.Repeat("a", 128),
+	}
+	for _, value := range valid {
+		if !isContractRequestID(value) {
+			t.Errorf("request ID %q should be valid", value)
+		}
+	}
+
+	invalid := []string{
+		"",
+		" leading-space",
+		"trailing-space ",
+		"line\nbreak",
+		"包含中文",
+		"path/segment",
+		strings.Repeat("a", 129),
+	}
+	for _, value := range invalid {
+		if isContractRequestID(value) {
+			t.Errorf("request ID %q should be rejected", value)
+		}
+	}
+
+	const requestID = "req-contract-match"
+	header := make(http.Header)
+	header.Set("X-Request-ID", requestID)
+	envelope := contractErrorEnvelope{
+		Error:     contractProblem{Code: "internal_error", Message: "服务暂时不可用"},
+		RequestID: requestID,
+	}
+	if header.Get("X-Request-ID") != envelope.RequestID {
+		t.Fatalf("response header request ID %q differs from envelope %q", header.Get("X-Request-ID"), envelope.RequestID)
+	}
+}
+
+func isContractRequestID(value string) bool {
+	if len(value) == 0 || len(value) > 128 {
+		return false
+	}
+	return regexp.MustCompile(`^[A-Za-z0-9._:-]+$`).MatchString(value)
 }
