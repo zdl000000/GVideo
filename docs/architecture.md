@@ -141,7 +141,8 @@ cmd/server -> modules -> shared/platform
 
 - 应用组合位于 `frontend/src/app/App.tsx`，页面按功能拆入 `frontend/src/features/`。
 - HTTP 客户端位于 `frontend/src/shared/api/client.ts`，通用组件和工具位于 `shared/`。
-- Handler、Service、Repository 已在现有 Go 包内按职责拆文件，尚未提升为独立业务包。
+- 视频举报与审核已作为首个纵向切片迁入 `internal/modules/moderation`，模块内拥有 Handler、Service、Repository 与聚焦测试；HTTP envelope、request ID、认证和 CSRF 仍由 `internal/httpapi` 统一控制。
+- 其余 Handler、Service、Repository 仍在现有 Go 包内按职责拆分，按低风险纵向切片逐步迁移。
 - 字幕管理入口和位置保持不变，仍只属于 `/me/videos` 投稿管理。
 - 指标、pprof 使用独立且默认关闭的管理监听端口；SQLite 使用迁移账本记录版本和校验和。
 

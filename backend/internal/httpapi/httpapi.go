@@ -19,6 +19,7 @@ import (
 
 	"gvideo/backend/internal/config"
 	"gvideo/backend/internal/domain"
+	"gvideo/backend/internal/modules/moderation"
 	"gvideo/backend/internal/platform/metrics"
 	"gvideo/backend/internal/service"
 )
@@ -30,10 +31,11 @@ type contextKey string
 const sessionKey contextKey = "session"
 
 type Handler struct {
-	service *service.Service
-	cfg     config.Config
-	logger  *slog.Logger
-	metrics *metrics.Registry
+	service    *service.Service
+	moderation *moderation.Handler
+	cfg        config.Config
+	logger     *slog.Logger
+	metrics    *metrics.Registry
 }
 
 type response struct {
@@ -42,7 +44,7 @@ type response struct {
 	RequestID string `json:"request_id"`
 }
 
-func New(service *service.Service, cfg config.Config, logger *slog.Logger, registries ...*metrics.Registry) *Handler {
+func New(service *service.Service, moderationService *moderation.Service, cfg config.Config, logger *slog.Logger, registries ...*metrics.Registry) *Handler {
 	var registry *metrics.Registry
 	if len(registries) > 0 {
 		registry = registries[0]
@@ -50,7 +52,9 @@ func New(service *service.Service, cfg config.Config, logger *slog.Logger, regis
 	if registry == nil {
 		registry = metrics.New()
 	}
-	return &Handler{service: service, cfg: cfg, logger: logger, metrics: registry}
+	h := &Handler{service: service, cfg: cfg, logger: logger, metrics: registry}
+	h.moderation = moderation.NewHandler(moderationService, moderationHTTPPort{handler: h})
+	return h
 }
 
 func (h *Handler) Routes() http.Handler {
@@ -82,8 +86,8 @@ func (h *Handler) Routes() http.Handler {
 		api.With(h.requireAuth).Get("/me/notifications", h.notifications)
 		api.With(h.requireAuth, h.requireCSRF).Patch("/me/notifications/{notificationID}/read", h.markNotificationRead)
 		api.With(h.requireAuth, h.requireCSRF).Post("/me/notifications/read-all", h.markAllNotificationsRead)
-		api.With(h.requireAuth).Get("/admin/reports", h.adminReports)
-		api.With(h.requireAuth, h.requireCSRF).Patch("/admin/reports/{reportID}", h.reviewReport)
+		api.With(h.requireAuth).Get("/admin/reports", h.moderation.AdminReports)
+		api.With(h.requireAuth, h.requireCSRF).Patch("/admin/reports/{reportID}", h.moderation.ReviewReport)
 
 		api.Get("/videos", h.listVideos)
 		api.Get("/videos/{videoID}", h.getVideo)
@@ -97,7 +101,7 @@ func (h *Handler) Routes() http.Handler {
 		api.With(h.requireAuth, h.requireCSRF).Delete("/videos/{videoID}/subtitles/{subtitleID}", h.deleteSubtitle)
 		api.With(h.requireAuth, h.requireCSRF).Post("/videos/{videoID}/like", h.toggleLike)
 		api.With(h.requireAuth, h.requireCSRF).Post("/videos/{videoID}/favorite", h.toggleFavorite)
-		api.With(h.requireAuth, h.requireCSRF).Post("/videos/{videoID}/reports", h.reportVideo)
+		api.With(h.requireAuth, h.requireCSRF).Post("/videos/{videoID}/reports", h.moderation.ReportVideo)
 		api.With(h.requireAuth, h.requireCSRF).Post("/videos/{videoID}/comments", h.createComment)
 		api.With(h.requireAuth, h.requireCSRF).Delete("/videos/{videoID}/comments/{commentID}", h.deleteComment)
 		api.With(h.requireAuth).Get("/me/videos", h.myVideos)
@@ -302,3 +306,27 @@ func sessionFrom(ctx context.Context) domain.Session {
 }
 
 func viewerID(ctx context.Context) int64 { return sessionFrom(ctx).User.ID }
+
+// moderationHTTPPort adapts application HTTP concerns without exposing the
+// httpapi package to the moderation module.
+type moderationHTTPPort struct{ handler *Handler }
+
+func (p moderationHTTPPort) Principal(ctx context.Context) moderation.Principal {
+	session := sessionFrom(ctx)
+	return moderation.Principal{UserID: session.User.ID, Username: session.User.Username}
+}
+func (p moderationHTTPPort) DecodeJSON(w http.ResponseWriter, r *http.Request, target any) bool {
+	return decodeJSON(w, r, target)
+}
+func (p moderationHTTPPort) WriteJSON(w http.ResponseWriter, r *http.Request, status int, data any) {
+	writeJSON(w, r, status, data)
+}
+func (p moderationHTTPPort) WriteError(w http.ResponseWriter, r *http.Request, err error) {
+	p.handler.writeError(w, r, err)
+}
+func (p moderationHTTPPort) VideoID(w http.ResponseWriter, r *http.Request) (int64, bool) {
+	return pathID(w, r)
+}
+func (p moderationHTTPPort) Pagination(r *http.Request, defaultSize int) (int, int) {
+	return pagination(r, defaultSize)
+}
