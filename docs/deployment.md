@@ -78,7 +78,10 @@ docker compose logs --tail 100 backend frontend
 
 - 页面：`http://127.0.0.1:8088`
 - 后端健康检查：`http://127.0.0.1:8080/healthz`
+- 后端存活检查：`http://127.0.0.1:8080/livez`
 - 同源健康检查：`http://127.0.0.1:8088/healthz`
+
+`/livez` 仅用于确认后端进程与 HTTP 服务可响应，不代表 SQLite、媒体 Worker、队列或外部命令已经就绪。现有 `/healthz` 与 Compose 健康检查保持兼容，暂不切换。
 
 停止容器与项目网络：
 

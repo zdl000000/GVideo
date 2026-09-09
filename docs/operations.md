@@ -126,6 +126,9 @@ docker compose -f compose.yaml -f compose.https.yaml config
 - 开发页面：`http://127.0.0.1:5173`
 - Docker 页面：`http://127.0.0.1:8088`
 - 后端健康检查：`http://127.0.0.1:8080/healthz`
+- 后端存活检查：`http://127.0.0.1:8080/livez`
+
+`/livez` 只表示后端进程与 HTTP 服务仍可响应，不检查 SQLite、媒体 Worker、任务队列或 FFmpeg 等外部命令。`/healthz` 暂时保留相同的存活语义以兼容现有客户端和 Compose 健康检查；本次不切换容器健康检查。
 
 ### 上传后长期等待处理
 
