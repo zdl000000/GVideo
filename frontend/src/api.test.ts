@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ApiError, api, setCSRFToken } from "./api";
+import { ApiError, api, setCSRFToken } from "./shared/api/client";
 
 type ProgressListener = (event: ProgressEvent<XMLHttpRequestEventTarget>) => void;
 type EventListener = (event?: Event) => void;

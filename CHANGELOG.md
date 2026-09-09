@@ -4,6 +4,14 @@ GVideo 的重要变更记录在此。项目在首次正式发布后遵循语义�
 
 ## [未发布]
 
+### 变更
+
+- 前端全量视觉重设计：玫瑰色品牌色体系、胶囊化频道导航与筛选控件、分层圆角与阴影令牌、玻璃质感播放器控件与 shimmer 骨架屏，浅色与深色主题同权重校准。
+- 设计令牌体系落地 `styles.css`，组件样式全部语义化；`docs/design-system.md` 同步更新色彩、圆角、阴影与交互状态规范。
+- 完成 Feature-first 前端结构迁移：全部页面从 `app/App.tsx` 拆分至 `features/`（videos、watch、creator、upload、auth、notifications、moderation），`App.tsx` 从约 2300 行降至约 340 行纯组合层，删除 `src/App.tsx` 与 `src/api.ts` 兼容出口。
+- 新增 shared 层基础设施：格式化工具、Avatar、VideoCard、Pagination、处理状态徽章、加载/错误/空状态组件、弹窗焦点管理 Hook 与可见性常量。
+- 新增 16 个组件测试（Vitest + Testing Library + jsdom），测试总数从 9 个增至 25 个。
+
 ### 新增
 
 - 用户资料、关注关系、通知、举报审核、投稿可见性、字幕管理和创作者数据工作台。
