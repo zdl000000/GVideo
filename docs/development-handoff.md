@@ -117,7 +117,7 @@
 
 1. `GUARD-01`：已完成（2026-09-10）。`internal/httpapi` 的生产 Go 文件由 AST 静态测试禁止导入 `database/sql` 或 `internal/repository`；目标测试与 `go vet` 已通过。
 2. `GUARD-02`：已完成（2026-09-10）。`frontend/src/shared` 的生产模块由静态测试禁止反向导入 `features` 或 `app`；目标测试与 TypeScript 类型检查已通过。
-3. `CONTRACT-01`：定义统一错误 envelope 和稳定错误码；只写规格与契约测试。
+3. `CONTRACT-01`：已完成（2026-09-10）。`docs/api-error-contract.md` 已冻结目标成功/错误 envelope、稳定错误码、request ID 与兼容性规则；契约测试只验证规格模型和错误码注册表，未修改生产 Handler、Service 或现有 API 行为。
 4. `CONTRACT-02`：逐组记录 Auth API 契约，不与其他路由并行修改。
 5. `DB-01`：补空库、历史库、迁移失败回滚和未知版本测试夹具。
 6. `DB-02`：建立迁移前备份门禁；不得在同一任务中改业务表结构。
