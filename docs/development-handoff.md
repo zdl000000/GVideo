@@ -124,7 +124,10 @@
 7. `MODULE-01`：已完成（2026-09-10）。视频举报与审核已按 Handler → Service → Repository → tests 单一纵向切片迁入 `internal/modules/moderation`；公开 API、认证/CSRF、HTTP envelope、稳定错误、重复举报更新语义和数据库 schema 保持不变。
 8. `FE-PERF-01`：已完成（2026-09-10）。HLS 继续保持播放路由内动态加载，并新增构建后唯一 chunk、550 kB raw、170 kB gzip 的硬预算；当前 Windows 实测约 509.53 kB / 157.47 kB。Vitest 多 worker 墙钟未稳定改善，继续保留单 worker 和关闭文件并行。
 9. `CI-01`：已完成（2026-09-10）。新增独立 Ubuntu Backend Race Job，以 `CGO_ENABLED=1` 执行 `go test -race ./... -count=1`；OpenAPI、迁移、E2E 和安全扫描仍保持为后续独立任务。
-10. `OPS-01`：分别设计 `/livez`、`/readyz`、结构化 request/job 日志和告警，不合并成一个大任务。
+10. `OPS-OBS-01A`：已完成（2026-09-10）。新增仅表示进程与 HTTP 服务可响应的 `/livez`；不探测 SQLite、媒体 Worker、队列或外部命令，`/healthz` 与 Compose 健康检查保持兼容。
+11. `OPS-OBS-01B`：新增 `/readyz`，仅检查初始化/迁移完成且 SQLite 可在 1 秒内响应。
+12. `OPS-OBS-01C`：定义并实现结构化 request/job 日志契约。
+13. `OPS-OBS-01D`：新增供应商无关的告警规格与 Runbook。
 
 新功能模块要等当前基线和依赖/契约护栏稳定后再排期；若业务需求紧急，也必须以独立纵向切片进入，不能与架构迁移共享文件。
 

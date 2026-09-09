@@ -13,6 +13,10 @@ import (
 
 func (h *Handler) optionalSession(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/livez" || r.URL.Path == "/healthz" {
+			next.ServeHTTP(w, r)
+			return
+		}
 		cookie, err := r.Cookie(sessionCookie)
 		if err == nil && cookie.Value != "" {
 			session, authErr := h.service.Authenticate(r.Context(), cookie.Value)

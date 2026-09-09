@@ -72,7 +72,9 @@ func (h *Handler) Routes() http.Handler {
 	router.Use(h.optionalSession)
 
 	router.Get("/", h.root)
-	router.Get("/healthz", h.health)
+	router.Get("/livez", h.livez)
+	// /healthz remains an alias for clients and deployments that predate /livez.
+	router.Get("/healthz", h.livez)
 	router.Get("/media/*", h.media)
 	router.Route("/api/v1", func(api chi.Router) {
 		api.Get("/categories", h.categories)
@@ -172,7 +174,7 @@ func resolveServedMediaPath(root, storedPath string) (string, error) {
 	return realResolved, nil
 }
 
-func (h *Handler) health(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) livez(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, r, http.StatusOK, map[string]string{"status": "ok"})
 }
 
