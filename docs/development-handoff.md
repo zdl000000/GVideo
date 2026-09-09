@@ -116,7 +116,7 @@
 基线通过后按以下顺序推进，每次只领取一项：
 
 1. `GUARD-01`：已完成（2026-09-10）。`internal/httpapi` 的生产 Go 文件由 AST 静态测试禁止导入 `database/sql` 或 `internal/repository`；目标测试与 `go vet` 已通过。
-2. `GUARD-02`：增加 `shared` 禁止反向导入 `features/app` 的前端边界守卫。
+2. `GUARD-02`：已完成（2026-09-10）。`frontend/src/shared` 的生产模块由静态测试禁止反向导入 `features` 或 `app`；目标测试与 TypeScript 类型检查已通过。
 3. `CONTRACT-01`：定义统一错误 envelope 和稳定错误码；只写规格与契约测试。
 4. `CONTRACT-02`：逐组记录 Auth API 契约，不与其他路由并行修改。
 5. `DB-01`：补空库、历史库、迁移失败回滚和未知版本测试夹具。
