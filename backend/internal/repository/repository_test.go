@@ -137,44 +137,6 @@ func TestFavoriteVideosAreFilteredAndSortedByFavoriteTime(t *testing.T) {
 	}
 }
 
-func TestVideoReportReviewLifecycle(t *testing.T) {
-	db, err := platform.OpenDatabase(filepath.Join(t.TempDir(), "reports.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	repo := New(db)
-	ctx := context.Background()
-	author, err := repo.CreateUser(ctx, "report_review_author", "hash")
-	if err != nil {
-		t.Fatal(err)
-	}
-	reporter, err := repo.CreateUser(ctx, "report_review_viewer", "hash")
-	if err != nil {
-		t.Fatal(err)
-	}
-	video, err := repo.CreateVideo(ctx, domain.NewVideo{UserID: author.ID, Title: "Review target", Category: "knowledge", VideoPath: "videos/review.mp4", MimeType: "video/mp4", SizeBytes: 10})
-	if err != nil {
-		t.Fatal(err)
-	}
-	report, err := repo.UpsertVideoReport(ctx, video.ID, reporter.ID, "spam", "review this")
-	if err != nil {
-		t.Fatal(err)
-	}
-	page, err := repo.ListVideoReports(ctx, "pending", 1, 20)
-	if err != nil || page.Total != 1 || len(page.Items) != 1 || page.Items[0].VideoTitle != video.Title || page.Items[0].ReporterUsername != reporter.Username {
-		t.Fatalf("pending reports = %#v err=%v", page, err)
-	}
-	updated, err := repo.UpdateVideoReportStatus(ctx, report.ID, "resolved")
-	if err != nil || updated.Status != "resolved" || updated.VideoAuthor != author.Username {
-		t.Fatalf("updated report = %#v err=%v", updated, err)
-	}
-	pending, err := repo.ListVideoReports(ctx, "pending", 1, 20)
-	if err != nil || pending.Total != 0 || len(pending.Items) != 0 {
-		t.Fatalf("pending after review = %#v err=%v", pending, err)
-	}
-}
-
 func TestDeleteCommentAuthorization(t *testing.T) {
 	db, err := platform.OpenDatabase(filepath.Join(t.TempDir(), "comments.db"))
 	if err != nil {

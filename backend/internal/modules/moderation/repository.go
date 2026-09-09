@@ -1,11 +1,36 @@
-package repository
+package moderation
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 
 	"gvideo/backend/internal/domain"
 )
+
+// Repository owns moderation persistence and its read model.
+type Repository struct {
+	db *sql.DB
+}
+
+func NewRepository(db *sql.DB) *Repository {
+	return &Repository{db: db}
+}
+
+func (r *Repository) VideoAuthorID(ctx context.Context, videoID, viewerID int64) (int64, error) {
+	var authorID int64
+	err := r.db.QueryRowContext(ctx, `
+SELECT user_id FROM videos
+WHERE id = ? AND (visibility <> 'private' OR user_id = ?)`, videoID, viewerID).Scan(&authorID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, domain.ErrNotFound
+	}
+	if err != nil {
+		return 0, fmt.Errorf("find reportable video: %w", err)
+	}
+	return authorID, nil
+}
 
 func (r *Repository) UpsertVideoReport(ctx context.Context, videoID, userID int64, reason, detail string) (domain.VideoReport, error) {
 	_, err := r.db.ExecContext(ctx, `

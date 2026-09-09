@@ -76,15 +76,6 @@ func New(repo *repository.Repository, cfg config.Config, logger *slog.Logger) *S
 	return &Service{repo: repo, cfg: cfg, logger: logger}
 }
 
-func validReportStatus(status string) bool {
-	switch status {
-	case "pending", "reviewed", "resolved", "dismissed":
-		return true
-	default:
-		return false
-	}
-}
-
 func randomToken(bytes int) (string, error) {
 	buf := make([]byte, bytes)
 	if _, err := rand.Read(buf); err != nil {

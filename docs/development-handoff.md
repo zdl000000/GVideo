@@ -121,7 +121,7 @@
 4. `CONTRACT-02`：已完成（2026-09-10）。`docs/auth-api-contract.md` 已冻结注册、登录、登出和当前会话的请求/响应、Cookie、CSRF、安全及稳定错误码；契约测试只验证规格注册表和 JSON 模型，未修改生产 Handler、Service 或现有 API 行为。
 5. `DB-01`：已完成（2026-09-10）。新增冻结历史库 SQL 夹具及空库初始化、历史库升级、迁移失败事务回滚与重试、未来未知版本拒绝且零修改测试；未修改生产迁移代码或业务表结构。
 6. `DB-02`：已完成（2026-09-10）。后端对已有持久状态且存在待执行迁移的 SQLite 库，在任何迁移写入前创建、验证并以不覆盖既有文件的方式发布一致快照；备份失败 fail closed，未修改业务表结构。
-7. `MODULE-01`：选择低风险业务模块，按 Handler → Service → Repository → tests 的纵向切片迁移；一次只迁一个模块。
+7. `MODULE-01`：已完成（2026-09-10）。视频举报与审核已按 Handler → Service → Repository → tests 单一纵向切片迁入 `internal/modules/moderation`；公开 API、认证/CSRF、HTTP envelope、稳定错误、重复举报更新语义和数据库 schema 保持不变。
 8. `FE-PERF-01`：单独评估 HLS chunk 预算和 Vitest 文件级并行恢复。
 9. `CI-01`：Linux race Job；随后再分别增加 OpenAPI、迁移、E2E 和安全扫描 Job。
 10. `OPS-01`：分别设计 `/livez`、`/readyz`、结构化 request/job 日志和告警，不合并成一个大任务。
