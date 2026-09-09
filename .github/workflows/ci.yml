@@ -28,6 +28,24 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+  race:
+    name: Backend Race
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      CGO_ENABLED: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Race test
+        run: go test -race ./... -count=1
+
   frontend:
     name: Frontend
     runs-on: ubuntu-latest
