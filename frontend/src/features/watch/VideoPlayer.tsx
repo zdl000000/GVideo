@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import Hls from "hls.js";
+import type Hls from "hls.js";
 import { Check, ChevronUp, Maximize2, Minimize2, Pause, PictureInPicture2, Play, RectangleHorizontal, Settings2, Volume2, VolumeX } from "lucide-react";
 import { formatDuration } from "../../shared/lib/format";
+import { loadHLSModule } from "./hlsLoader";
 import type { SubtitleTrack, Video } from "../../types";
 
 export interface PlayerQuality {
@@ -63,6 +64,8 @@ export function VideoPlayer({ video }: { video: Video }) {
   const [theaterMode, setTheaterMode] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [resumeNotice, setResumeNotice] = useState<number | null>(null);
+  const [streamStatus, setStreamStatus] = useState<"idle" | "preparing" | "fallback" | "failed">("idle");
+  const [streamAttempt, setStreamAttempt] = useState(0);
   const lastProgressSaveRef = useRef(0);
 
   const saveProgress = (element: HTMLVideoElement) => {
@@ -77,6 +80,12 @@ export function VideoPlayer({ video }: { video: Video }) {
   useEffect(() => {
     const element = videoRef.current;
     if (!element) return;
+
+    let cancelled = false;
+    let resumeNoticeTimer: number | undefined;
+    let playlistController: AbortController | undefined;
+    let activeHLS: Hls | null = null;
+    let sourceMode: "direct" | "hls" | "fallback" = video.hls_url ? "hls" : "direct";
 
     hlsRef.current?.destroy();
     hlsRef.current = null;
@@ -93,6 +102,7 @@ export function VideoPlayer({ video }: { video: Video }) {
     setCurrentTime(0);
     setDuration(0);
     setPlaybackRate(1);
+    setStreamStatus(video.hls_url ? "preparing" : "idle");
     lastProgressSaveRef.current = 0;
 
     const restoreProgress = () => {
@@ -100,7 +110,24 @@ export function VideoPlayer({ video }: { video: Video }) {
       if (!Number.isFinite(saved) || saved < 5 || (element.duration > 0 && saved >= element.duration - 5)) return;
       element.currentTime = saved;
       setResumeNotice(saved);
-      window.setTimeout(() => setResumeNotice(null), 3500);
+      resumeNoticeTimer = window.setTimeout(() => {
+        if (!cancelled) setResumeNotice(null);
+      }, 3500);
+    };
+    const fallbackToDirect = () => {
+      sourceMode = "fallback";
+      setQualities([]);
+      setUsingHLS(false);
+      setStreamStatus("fallback");
+      element.src = video.video_url;
+      element.load();
+    };
+    const handleMediaError = () => {
+      if (sourceMode === "hls" && video.video_url) {
+        fallbackToDirect();
+        return;
+      }
+      if (sourceMode === "fallback") setStreamStatus("failed");
     };
     const handleTimeUpdate = () => {
       setCurrentTime(element.currentTime);
@@ -125,6 +152,7 @@ export function VideoPlayer({ video }: { video: Video }) {
     const handleFullscreenChange = () => setFullscreen(document.fullscreenElement === playerRef.current);
     element.addEventListener("loadedmetadata", handleLoadedMetadata, { once: true });
     element.addEventListener("timeupdate", handleTimeUpdate);
+    element.addEventListener("error", handleMediaError);
     element.addEventListener("pause", handlePause);
     element.addEventListener("ended", handleEnded);
     element.addEventListener("play", handlePlay);
@@ -134,87 +162,15 @@ export function VideoPlayer({ video }: { video: Video }) {
     document.addEventListener("fullscreenchange", handleFullscreenChange);
     handleVolumeChange();
 
-    if (!video.hls_url) {
-      element.src = video.video_url;
-      return () => {
-        element.removeEventListener("loadedmetadata", handleLoadedMetadata);
-        element.removeEventListener("timeupdate", handleTimeUpdate);
-        element.removeEventListener("pause", handlePause);
-        element.removeEventListener("ended", handleEnded);
-        element.removeEventListener("play", handlePlay);
-        element.removeEventListener("pause", handlePauseState);
-        element.removeEventListener("durationchange", handleDurationChange);
-        element.removeEventListener("volumechange", handleVolumeChange);
-        document.removeEventListener("fullscreenchange", handleFullscreenChange);
-      };
-    }
-    if (element.canPlayType("application/vnd.apple.mpegurl")) {
-      element.src = video.hls_url;
-      setQualities(nativeHLSQualities(video));
-      setUsingHLS(true);
-      const controller = new AbortController();
-      fetch(video.hls_url, { signal: controller.signal })
-        .then((response) => response.ok ? response.text() : Promise.reject(new Error("HLS playlist request failed")))
-        .then((playlist) => setQualities(parseHLSQualities(video.hls_url, playlist)))
-        .catch(() => undefined);
-      return () => {
-        controller.abort();
-        element.removeEventListener("loadedmetadata", handleLoadedMetadata);
-        element.removeEventListener("timeupdate", handleTimeUpdate);
-        element.removeEventListener("pause", handlePause);
-        element.removeEventListener("ended", handleEnded);
-        element.removeEventListener("play", handlePlay);
-        element.removeEventListener("pause", handlePauseState);
-        element.removeEventListener("durationchange", handleDurationChange);
-        element.removeEventListener("volumechange", handleVolumeChange);
-        document.removeEventListener("fullscreenchange", handleFullscreenChange);
-      };
-    }
-    if (!Hls.isSupported()) {
-      element.src = video.video_url;
-      return () => {
-        element.removeEventListener("loadedmetadata", handleLoadedMetadata);
-        element.removeEventListener("timeupdate", handleTimeUpdate);
-        element.removeEventListener("pause", handlePause);
-        element.removeEventListener("ended", handleEnded);
-        element.removeEventListener("play", handlePlay);
-        element.removeEventListener("pause", handlePauseState);
-        element.removeEventListener("durationchange", handleDurationChange);
-        element.removeEventListener("volumechange", handleVolumeChange);
-        document.removeEventListener("fullscreenchange", handleFullscreenChange);
-      };
-    }
-
-    const hls = new Hls({ enableWorker: true, startLevel: -1, backBufferLength: 60 });
-    hlsRef.current = hls;
-    hls.attachMedia(element);
-    hls.on(Hls.Events.MEDIA_ATTACHED, () => hls.loadSource(video.hls_url));
-    hls.on(Hls.Events.MANIFEST_PARSED, (_, data) => {
-      const available = data.levels
-        .map((level, index) => ({ index, height: level.height }))
-        .filter((level) => level.height > 0)
-        .filter((level, index, all) => all.findIndex((candidate) => candidate.height === level.height) === index)
-        .sort((a, b) => a.height - b.height);
-      setQualities(available);
-      setUsingHLS(true);
-    });
-    hls.on(Hls.Events.ERROR, (_, data) => {
-      if (!data.fatal) return;
-      const currentTime = element.currentTime;
-      hls.destroy();
-      hlsRef.current = null;
-      setQualities([]);
-      setUsingHLS(false);
-      element.src = video.video_url;
-      element.currentTime = currentTime;
-      void element.play().catch(() => undefined);
-    });
-
-    return () => {
-      hls.destroy();
-      if (hlsRef.current === hls) hlsRef.current = null;
+    const cleanup = () => {
+      cancelled = true;
+      if (resumeNoticeTimer !== undefined) window.clearTimeout(resumeNoticeTimer);
+      playlistController?.abort();
+      activeHLS?.destroy();
+      if (hlsRef.current === activeHLS) hlsRef.current = null;
       element.removeEventListener("loadedmetadata", handleLoadedMetadata);
       element.removeEventListener("timeupdate", handleTimeUpdate);
+      element.removeEventListener("error", handleMediaError);
       element.removeEventListener("pause", handlePause);
       element.removeEventListener("ended", handleEnded);
       element.removeEventListener("play", handlePlay);
@@ -223,7 +179,72 @@ export function VideoPlayer({ video }: { video: Video }) {
       element.removeEventListener("volumechange", handleVolumeChange);
       document.removeEventListener("fullscreenchange", handleFullscreenChange);
     };
-  }, [video.id, video.hls_url, video.video_url]);
+
+    if (!video.hls_url) {
+      element.src = video.video_url;
+      return cleanup;
+    }
+    if (element.canPlayType("application/vnd.apple.mpegurl")) {
+      element.src = video.hls_url;
+      setQualities(nativeHLSQualities(video));
+      setUsingHLS(true);
+      setStreamStatus("idle");
+      playlistController = new AbortController();
+      fetch(video.hls_url, { signal: playlistController.signal })
+        .then((response) => response.ok ? response.text() : Promise.reject(new Error("HLS playlist request failed")))
+        .then((playlist) => {
+          if (!cancelled) setQualities(parseHLSQualities(video.hls_url, playlist));
+        })
+        .catch(() => undefined);
+      return cleanup;
+    }
+    void loadHLSModule()
+      .then(({ default: Hls }) => {
+        if (cancelled) return;
+        if (!Hls.isSupported()) {
+          fallbackToDirect();
+          return;
+        }
+
+        const hls = new Hls({ enableWorker: true, startLevel: -1, backBufferLength: 60 });
+        if (cancelled) {
+          hls.destroy();
+          return;
+        }
+        activeHLS = hls;
+        hlsRef.current = hls;
+        hls.attachMedia(element);
+        hls.on(Hls.Events.MEDIA_ATTACHED, () => {
+          if (!cancelled) hls.loadSource(video.hls_url);
+        });
+        hls.on(Hls.Events.MANIFEST_PARSED, (_, data) => {
+          if (cancelled) return;
+          const available = data.levels
+            .map((level, index) => ({ index, height: level.height }))
+            .filter((level) => level.height > 0)
+            .filter((level, index, all) => all.findIndex((candidate) => candidate.height === level.height) === index)
+            .sort((a, b) => a.height - b.height);
+          setQualities(available);
+          setUsingHLS(true);
+          setStreamStatus("idle");
+        });
+        hls.on(Hls.Events.ERROR, (_, data) => {
+          if (cancelled || !data.fatal) return;
+          const currentTime = element.currentTime;
+          hls.destroy();
+          activeHLS = null;
+          if (hlsRef.current === hls) hlsRef.current = null;
+          fallbackToDirect();
+          element.currentTime = currentTime;
+          void element.play().catch(() => undefined);
+        });
+      })
+      .catch(() => {
+        if (!cancelled) fallbackToDirect();
+      });
+
+    return cleanup;
+  }, [video.id, video.hls_url, video.video_url, streamAttempt]);
 
   useEffect(() => {
     if (!qualityMenuOpen && !speedMenuOpen && !subtitleMenuOpen && !settingsOpen) return;
@@ -252,7 +273,8 @@ export function VideoPlayer({ video }: { video: Video }) {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
+      const target = event.target;
+      if (target instanceof Element && target.closest("button, a, input, textarea, select, option, [contenteditable]:not([contenteditable='false'])")) return;
       if (event.key === " ") {
         event.preventDefault();
         const element = videoRef.current;
@@ -349,12 +371,18 @@ export function VideoPlayer({ video }: { video: Video }) {
   };
 
   return (
-    <div className={`player-wrap ${theaterMode ? "theater-mode" : ""}`} ref={playerRef}>
+    <div className={`player-wrap ${theaterMode ? "theater-mode" : ""}`} ref={playerRef} aria-busy={streamStatus === "preparing"}>
       <video ref={videoRef} poster={video.cover_url || undefined} playsInline onClick={togglePlay}>
         {subtitleTracks.map((track) => (
         <track key={track.id} kind="subtitles" src={track.url} srcLang={track.language} label={track.label} default={track.is_default} />
         ))}
       </video>
+      {streamStatus !== "idle" && (
+        <div className={`stream-status stream-status-${streamStatus}`} role="status" aria-live="polite">
+          <span>{streamStatus === "preparing" ? "正在准备高清流" : streamStatus === "fallback" ? "高清流不可用，已切换原始视频" : "视频加载失败，请重试"}</span>
+          {streamStatus === "failed" && <button type="button" onClick={() => setStreamAttempt((attempt) => attempt + 1)}>重试播放</button>}
+        </div>
+      )}
       {resumeNotice !== null && (
         <div className="resume-notice" role="status">
           <span>已从 {formatDuration(resumeNotice)} 继续播放</span>

@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { FormEvent, lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   Bell,
   Bookmark,
@@ -22,22 +22,24 @@ import {
 } from "lucide-react";
 import { Link, NavLink, Navigate, Outlet, Route, Routes, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { ApiError, api, setCSRFToken } from "../shared/api/client";
-import { AuthPage } from "../features/auth/AuthPage";
-import { CreatorDashboard } from "../features/creator/CreatorDashboard";
-import { CreatorPage } from "../features/creator/CreatorPage";
-import { NotificationCenterPage } from "../features/notifications/NotificationCenterPage";
-import { AdminReportsPage } from "../features/moderation/AdminReportsPage";
-import { FavoritesPage } from "../features/videos/FavoritesPage";
-import { FollowingPage } from "../features/videos/FollowingPage";
-import { HomePage } from "../features/videos/HomePage";
-import { LatestPage } from "../features/videos/LatestPage";
-import { MyVideosPage } from "../features/videos/MyVideosPage";
-import { PopularPage } from "../features/videos/PopularPage";
-import { UploadPage } from "../features/upload/UploadPage";
-import { VideoPage } from "../features/watch/VideoPage";
 import { Avatar } from "../shared/components/Avatar";
 import { LoadingBlock, NotFound } from "../shared/components/Feedback";
+import { RouteErrorBoundary } from "./RouteErrorBoundary";
 import type { AuthPayload, User } from "../types";
+
+const AuthPage = lazy(() => import("../features/auth/AuthPage").then((module) => ({ default: module.AuthPage })));
+const CreatorDashboard = lazy(() => import("../features/creator/CreatorDashboard").then((module) => ({ default: module.CreatorDashboard })));
+const CreatorPage = lazy(() => import("../features/creator/CreatorPage").then((module) => ({ default: module.CreatorPage })));
+const NotificationCenterPage = lazy(() => import("../features/notifications/NotificationCenterPage").then((module) => ({ default: module.NotificationCenterPage })));
+const AdminReportsPage = lazy(() => import("../features/moderation/AdminReportsPage").then((module) => ({ default: module.AdminReportsPage })));
+const FavoritesPage = lazy(() => import("../features/videos/FavoritesPage").then((module) => ({ default: module.FavoritesPage })));
+const FollowingPage = lazy(() => import("../features/videos/FollowingPage").then((module) => ({ default: module.FollowingPage })));
+const HomePage = lazy(() => import("../features/videos/HomePage").then((module) => ({ default: module.HomePage })));
+const LatestPage = lazy(() => import("../features/videos/LatestPage").then((module) => ({ default: module.LatestPage })));
+const MyVideosPage = lazy(() => import("../features/videos/MyVideosPage").then((module) => ({ default: module.MyVideosPage })));
+const PopularPage = lazy(() => import("../features/videos/PopularPage").then((module) => ({ default: module.PopularPage })));
+const UploadPage = lazy(() => import("../features/upload/UploadPage").then((module) => ({ default: module.UploadPage })));
+const VideoPage = lazy(() => import("../features/watch/VideoPage").then((module) => ({ default: module.VideoPage })));
 
 type Theme = "light" | "dark";
 
@@ -217,7 +219,11 @@ function Shell({ auth, onLogout, theme, onThemeChange }: { auth: AuthState; onLo
           <ThemeButton theme={theme} onChange={onThemeChange} />
         </header>
         <main className="auth-main">
-          <Outlet />
+          <RouteErrorBoundary key={location.key}>
+            <Suspense fallback={<LoadingBlock label="正在加载页面" />}>
+              <Outlet />
+            </Suspense>
+          </RouteErrorBoundary>
         </main>
       </div>
     );
@@ -306,7 +312,11 @@ function Shell({ auth, onLogout, theme, onThemeChange }: { auth: AuthState; onLo
       </aside>
 
       <main className="main-content">
-        <Outlet />
+        <RouteErrorBoundary key={location.key}>
+          <Suspense fallback={<LoadingBlock label="正在加载页面" />}>
+            <Outlet />
+          </Suspense>
+        </RouteErrorBoundary>
       </main>
     </div>
   );
