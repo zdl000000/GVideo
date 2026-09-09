@@ -122,7 +122,7 @@
 5. `DB-01`：已完成（2026-09-10）。新增冻结历史库 SQL 夹具及空库初始化、历史库升级、迁移失败事务回滚与重试、未来未知版本拒绝且零修改测试；未修改生产迁移代码或业务表结构。
 6. `DB-02`：已完成（2026-09-10）。后端对已有持久状态且存在待执行迁移的 SQLite 库，在任何迁移写入前创建、验证并以不覆盖既有文件的方式发布一致快照；备份失败 fail closed，未修改业务表结构。
 7. `MODULE-01`：已完成（2026-09-10）。视频举报与审核已按 Handler → Service → Repository → tests 单一纵向切片迁入 `internal/modules/moderation`；公开 API、认证/CSRF、HTTP envelope、稳定错误、重复举报更新语义和数据库 schema 保持不变。
-8. `FE-PERF-01`：单独评估 HLS chunk 预算和 Vitest 文件级并行恢复。
+8. `FE-PERF-01`：已完成（2026-09-10）。HLS 继续保持播放路由内动态加载，并新增构建后唯一 chunk、550 kB raw、170 kB gzip 的硬预算；当前 Windows 实测约 509.53 kB / 157.47 kB。Vitest 多 worker 墙钟未稳定改善，继续保留单 worker 和关闭文件并行。
 9. `CI-01`：Linux race Job；随后再分别增加 OpenAPI、迁移、E2E 和安全扫描 Job。
 10. `OPS-01`：分别设计 `/livez`、`/readyz`、结构化 request/job 日志和告警，不合并成一个大任务。
 
