@@ -13,6 +13,14 @@ import (
 	"gvideo/backend/internal/repository"
 )
 
+// StatsRecorder is the consumer-defined narrow interface the worker uses to
+// report job lifecycle events. Implementations must be concurrency-safe.
+type StatsRecorder interface {
+	MediaJobClaimed()
+	MediaJobCompleted(duration time.Duration)
+	MediaJobFailed(stage string)
+}
+
 type Worker struct {
 	repo         *repository.Repository
 	prober       Prober
@@ -21,6 +29,7 @@ type Worker struct {
 	pollInterval time.Duration
 	maxAttempts  int
 	logger       *slog.Logger
+	stats        StatsRecorder
 }
 
 func NewWorker(repo *repository.Repository, prober Prober, transcoder Transcoder, mediaDir string, pollInterval time.Duration, logger *slog.Logger) *Worker {
@@ -28,6 +37,12 @@ func NewWorker(repo *repository.Repository, prober Prober, transcoder Transcoder
 		repo: repo, prober: prober, transcoder: transcoder, mediaDir: mediaDir, pollInterval: pollInterval,
 		maxAttempts: 3, logger: logger,
 	}
+}
+
+// WithStats attaches an optional StatsRecorder and returns the worker for chaining.
+func (w *Worker) WithStats(stats StatsRecorder) *Worker {
+	w.stats = stats
+	return w
 }
 
 func (w *Worker) Run(ctx context.Context) {
@@ -67,9 +82,15 @@ func (w *Worker) processOne(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	startedAt := time.Now()
+	if w.stats != nil {
+		w.stats.MediaJobClaimed()
+	}
 	w.logger.Info("media job started", "job_id", job.ID, "video_id", job.VideoID, "attempt", job.Attempts)
 	inputPath, err := resolveMediaPath(w.mediaDir, job.VideoPath)
 	if err != nil {
+		if w.stats != nil {
+			w.stats.MediaJobFailed("resolve")
+		}
 		if saveErr := w.repo.FailTranscodingJob(ctx, job.ID, job.VideoID, err.Error(), nil); saveErr != nil {
 			return true, saveErr
 		}
@@ -87,6 +108,9 @@ func (w *Worker) processOne(ctx context.Context) (bool, error) {
 		}
 		if saveErr := w.repo.FailTranscodingJob(ctx, job.ID, job.VideoID, err.Error(), retryAt); saveErr != nil {
 			return true, saveErr
+		}
+		if w.stats != nil {
+			w.stats.MediaJobFailed("probe")
 		}
 		w.logger.Warn("media job failed", "job_id", job.ID, "video_id", job.VideoID, "attempt", job.Attempts, "retry", retryAt != nil, "error", err)
 		return true, nil
@@ -107,6 +131,9 @@ func (w *Worker) processOne(ctx context.Context) (bool, error) {
 		if saveErr := w.repo.FailTranscodingJob(ctx, job.ID, job.VideoID, err.Error(), retryAt); saveErr != nil {
 			return true, saveErr
 		}
+		if w.stats != nil {
+			w.stats.MediaJobFailed("transcode")
+		}
 		w.logger.Warn("HLS transcode failed", "job_id", job.ID, "video_id", job.VideoID, "attempt", job.Attempts, "retry", retryAt != nil, "error", err)
 		return true, nil
 	}
@@ -115,7 +142,13 @@ func (w *Worker) processOne(ctx context.Context) (bool, error) {
 	}
 	output := domain.MediaOutput{Metadata: metadata, HLSMasterPath: hlsMasterPath}
 	if err := w.repo.CompleteTranscodingJob(ctx, job.ID, job.VideoID, output); err != nil {
+		if w.stats != nil {
+			w.stats.MediaJobFailed("complete")
+		}
 		return true, err
+	}
+	if w.stats != nil {
+		w.stats.MediaJobCompleted(time.Since(startedAt))
 	}
 	w.logger.Info("media job completed", "job_id", job.ID, "video_id", job.VideoID, "duration", time.Since(startedAt), "width", metadata.Width, "height", metadata.Height, "hls_master_path", hlsMasterPath)
 	return true, nil

@@ -2,6 +2,8 @@ package config
 
 import (
 	"fmt"
+	"net"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -28,6 +30,8 @@ type Config struct {
 	HLSEnabled              bool
 	HLSTranscodeTimeout     time.Duration
 	HLSSegmentSeconds       int
+	MetricsAddr             string
+	PprofAddr               string
 }
 
 func Load() (Config, error) {
@@ -76,6 +80,16 @@ func Load() (Config, error) {
 	if err != nil || hlsSegmentSeconds < 2 || hlsSegmentSeconds > 10 {
 		return Config{}, fmt.Errorf("HLS_SEGMENT_SECONDS must be between 2 and 10")
 	}
+	metricsAddr := strings.TrimSpace(os.Getenv("METRICS_ADDR"))
+	pprofAddr := strings.TrimSpace(os.Getenv("PPROF_ADDR"))
+	if appEnv == "production" {
+		if err := validateProductionDiagnosticsAddress("METRICS_ADDR", metricsAddr); err != nil {
+			return Config{}, err
+		}
+		if err := validateProductionDiagnosticsAddress("PPROF_ADDR", pprofAddr); err != nil {
+			return Config{}, err
+		}
+	}
 
 	databasePath, err := filepath.Abs(env("DATABASE_PATH", "./data/gvideo.db"))
 	if err != nil {
@@ -104,7 +118,42 @@ func Load() (Config, error) {
 		HLSEnabled:              hlsEnabled,
 		HLSTranscodeTimeout:     hlsTimeout,
 		HLSSegmentSeconds:       hlsSegmentSeconds,
+		MetricsAddr:             metricsAddr,
+		PprofAddr:               pprofAddr,
 	}, nil
+}
+
+func validateProductionDiagnosticsAddress(name, address string) error {
+	if address == "" {
+		return nil
+	}
+
+	host, port, err := net.SplitHostPort(address)
+	if err != nil {
+		return fmt.Errorf("%s must use host:port format: %w", name, err)
+	}
+	portNumber, err := strconv.Atoi(port)
+	if err != nil || portNumber < 1 || portNumber > 65535 {
+		return fmt.Errorf("%s port must be between 1 and 65535", name)
+	}
+
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return fmt.Errorf("%s must not bind an unspecified or wildcard address in production", name)
+	}
+	if strings.EqualFold(host, "localhost") {
+		return nil
+	}
+
+	ip, err := netip.ParseAddr(host)
+	if err != nil {
+		return fmt.Errorf("%s must use localhost or a literal loopback/private IP address in production", name)
+	}
+	ip = ip.Unmap()
+	if ip.IsUnspecified() || (!ip.IsLoopback() && !ip.IsPrivate()) {
+		return fmt.Errorf("%s must use a loopback or private IP address in production", name)
+	}
+	return nil
 }
 
 func env(key, fallback string) string {

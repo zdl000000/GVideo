@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
+	httppprof "net/http/pprof"
 	"os"
 	"os/signal"
 	"syscall"
@@ -14,6 +16,7 @@ import (
 	"gvideo/backend/internal/httpapi"
 	"gvideo/backend/internal/media"
 	"gvideo/backend/internal/platform"
+	"gvideo/backend/internal/platform/metrics"
 	"gvideo/backend/internal/repository"
 	"gvideo/backend/internal/service"
 )
@@ -43,7 +46,8 @@ func main() {
 
 	repo := repository.New(db)
 	svc := service.New(repo, cfg, logger)
-	handler := httpapi.New(svc, cfg, logger)
+	registry := metrics.New()
+	handler := httpapi.New(svc, cfg, logger, registry)
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           handler.Routes(),
@@ -54,11 +58,30 @@ func main() {
 		MaxHeaderBytes:    64 << 10,
 	}
 
+	if cfg.MetricsAddr != "" {
+		if cfg.MediaWorkerEnabled {
+			registry.GaugeFunc("media_queue_depth", "Transcoding jobs waiting or running.", func() float64 {
+				queryCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				defer cancel()
+				count, err := repo.PendingJobCount(queryCtx)
+				if err != nil {
+					return -1
+				}
+				return float64(count)
+			})
+		}
+	}
+	adminServers, err := startAdminServers(logger, cfg.MetricsAddr, cfg.PprofAddr, registry)
+	if err != nil {
+		logger.Error("start admin endpoints", "error", err)
+		os.Exit(1)
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if cfg.MediaWorkerEnabled {
 		transcoder := media.NewFFmpegTranscoder(cfg.HLSEnabled, cfg.FFmpegPath, cfg.MediaDir, cfg.HLSTranscodeTimeout, cfg.HLSSegmentSeconds)
-		worker := media.NewWorker(repo, media.NewFFprobe(cfg.FFprobePath, cfg.MediaProbeTimeout), transcoder, cfg.MediaDir, cfg.MediaWorkerPollInterval, logger)
+		worker := media.NewWorker(repo, media.NewFFprobe(cfg.FFprobePath, cfg.MediaProbeTimeout), transcoder, cfg.MediaDir, cfg.MediaWorkerPollInterval, logger).WithStats(registry)
 		go worker.Run(ctx)
 	}
 
@@ -76,6 +99,86 @@ func main() {
 	defer cancel()
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		logger.Error("graceful shutdown", "error", err)
+	}
+	for _, adminServer := range adminServers {
+		if err := adminServer.Shutdown(shutdownCtx); err != nil {
+			logger.Error("admin server shutdown", "addr", adminServer.Addr, "error", err)
+		}
+	}
+}
+
+type adminEndpoint struct {
+	name     string
+	path     string
+	server   *http.Server
+	listener net.Listener
+}
+
+func startAdminServers(logger *slog.Logger, metricsAddr, pprofAddr string, registry *metrics.Registry) ([]*http.Server, error) {
+	var endpoints []adminEndpoint
+	if metricsAddr != "" {
+		mux := http.NewServeMux()
+		mux.Handle("/metrics", registry.Handler())
+		endpoints = append(endpoints, adminEndpoint{
+			name: "metrics",
+			path: "/metrics",
+			server: &http.Server{
+				Addr:              metricsAddr,
+				Handler:           mux,
+				ReadHeaderTimeout: 5 * time.Second,
+				ReadTimeout:       5 * time.Second,
+				WriteTimeout:      5 * time.Second,
+				IdleTimeout:       30 * time.Second,
+			},
+		})
+	}
+	if pprofAddr != "" {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/debug/pprof/", httppprof.Index)
+		mux.HandleFunc("/debug/pprof/cmdline", httppprof.Cmdline)
+		mux.HandleFunc("/debug/pprof/profile", httppprof.Profile)
+		mux.HandleFunc("/debug/pprof/symbol", httppprof.Symbol)
+		mux.HandleFunc("/debug/pprof/trace", httppprof.Trace)
+		endpoints = append(endpoints, adminEndpoint{
+			name: "pprof",
+			path: "/debug/pprof/",
+			server: &http.Server{
+				Addr:              pprofAddr,
+				Handler:           mux,
+				ReadHeaderTimeout: 5 * time.Second,
+				ReadTimeout:       5 * time.Second,
+				WriteTimeout:      2 * time.Minute,
+				IdleTimeout:       30 * time.Second,
+			},
+		})
+	}
+
+	for index := range endpoints {
+		endpoint := &endpoints[index]
+		listener, err := net.Listen("tcp", endpoint.server.Addr)
+		if err != nil {
+			for previous := 0; previous < index; previous++ {
+				_ = endpoints[previous].listener.Close()
+			}
+			return nil, fmt.Errorf("bind %s admin endpoint %s: %w", endpoint.name, endpoint.server.Addr, err)
+		}
+		endpoint.listener = listener
+		endpoint.server.Addr = listener.Addr().String()
+	}
+
+	servers := make([]*http.Server, 0, len(endpoints))
+	for index := range endpoints {
+		endpoint := &endpoints[index]
+		servers = append(servers, endpoint.server)
+		go serveAdmin(logger, endpoint.server, endpoint.listener, endpoint.name, endpoint.path)
+	}
+	return servers, nil
+}
+
+func serveAdmin(logger *slog.Logger, server *http.Server, listener net.Listener, name, path string) {
+	logger.Info("admin server started", "name", name, "addr", server.Addr, "path", path)
+	if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
+		logger.Error("serve admin endpoint", "name", name, "addr", server.Addr, "error", err)
 	}
 }
 
