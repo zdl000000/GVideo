@@ -81,8 +81,9 @@ func OpenDatabaseReadOnly(path string) (*sql.DB, error) {
 	return db, nil
 }
 
-func migrate(db *sql.DB) error {
-	const schema = `
+// baselineSchemaV1SQL is immutable because its contents are part of migration
+// version 1's checksum. Future schema changes must be appended as new versions.
+const baselineSchemaV1SQL = `
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   username TEXT NOT NULL COLLATE NOCASE UNIQUE,
@@ -209,7 +210,14 @@ CREATE TABLE IF NOT EXISTS transcoding_jobs (
 );
 CREATE INDEX IF NOT EXISTS idx_transcoding_jobs_claim ON transcoding_jobs(status, available_at, id);
 `
-	if _, err := db.Exec(schema); err != nil {
+
+type databaseExecutor interface {
+	Exec(query string, args ...any) (sql.Result, error)
+	Query(query string, args ...any) (*sql.Rows, error)
+}
+
+func migrateBaselineV1(db databaseExecutor) error {
+	if _, err := db.Exec(baselineSchemaV1SQL); err != nil {
 		return fmt.Errorf("migrate database: %w", err)
 	}
 	columns := []struct {
@@ -265,7 +273,7 @@ END`); err != nil {
 	return nil
 }
 
-func ensureColumn(db *sql.DB, table, name, definition string) (bool, error) {
+func ensureColumn(db databaseExecutor, table, name, definition string) (bool, error) {
 	rows, err := db.Query(`PRAGMA table_info(` + table + `)`)
 	if err != nil {
 		return false, err

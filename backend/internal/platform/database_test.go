@@ -3,12 +3,156 @@ package platform
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	_ "modernc.org/sqlite"
 )
+
+func TestOpenDatabaseCreatesAndReusesMigrationLedger(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "ledger.db")
+	db, err := OpenDatabase(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var version int
+	var checksum string
+	if err := db.QueryRow(`SELECT version, checksum FROM schema_migrations`).Scan(&version, &checksum); err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	if version != 1 || checksum != migrationChecksum(databaseMigrations[0]) {
+		db.Close()
+		t.Fatalf("unexpected ledger row: version=%d checksum=%q", version, checksum)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err = OpenDatabase(path)
+	if err != nil {
+		t.Fatalf("reopen migrated database: %v", err)
+	}
+	defer db.Close()
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("migration ledger is not idempotent: count=%d err=%v", count, err)
+	}
+}
+
+func TestOpenDatabaseRejectsMigrationChecksumMismatch(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "checksum.db")
+	db, err := OpenDatabase(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE schema_migrations SET checksum = 'tampered' WHERE version = 1`); err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := OpenDatabase(path); err == nil || !strings.Contains(err.Error(), "checksum mismatch") {
+		t.Fatalf("expected checksum mismatch, got %v", err)
+	}
+}
+
+func TestMigrationFailureRollsBackLedgerAndChanges(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rollback.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	migrations := []databaseMigration{
+		{
+			version:  1,
+			identity: "failing-migration",
+			apply: func(tx *sql.Tx) error {
+				if _, err := tx.Exec(`CREATE TABLE should_rollback (id INTEGER PRIMARY KEY)`); err != nil {
+					return err
+				}
+				return fmt.Errorf("intentional failure")
+			},
+		},
+	}
+	if err := runMigrations(db, migrations); err == nil {
+		t.Fatal("expected migration failure")
+	}
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN ('schema_migrations', 'should_rollback')`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("failed migration left %d tables behind", count)
+	}
+}
+
+func TestMigrationRejectsUnknownVersionAndLedgerGap(t *testing.T) {
+	newMigration := func(version int) databaseMigration {
+		return databaseMigration{
+			version:  version,
+			identity: fmt.Sprintf("migration-%d", version),
+			apply: func(*sql.Tx) error {
+				return nil
+			},
+		}
+	}
+
+	t.Run("unknown version", func(t *testing.T) {
+		db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "unknown.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		if _, err := db.Exec(`CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, checksum TEXT NOT NULL)`); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Exec(`INSERT INTO schema_migrations(version, checksum) VALUES (2, 'future')`); err != nil {
+			t.Fatal(err)
+		}
+		if err := runMigrations(db, []databaseMigration{newMigration(1)}); err == nil || !strings.Contains(err.Error(), "newer than this application") {
+			t.Fatalf("expected unknown migration rejection, got %v", err)
+		}
+	})
+
+	t.Run("ledger gap", func(t *testing.T) {
+		db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "gap.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		migrations := []databaseMigration{newMigration(1), newMigration(2)}
+		if _, err := db.Exec(`CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, checksum TEXT NOT NULL)`); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Exec(`INSERT INTO schema_migrations(version, checksum) VALUES (2, ?)`, migrationChecksum(migrations[1])); err != nil {
+			t.Fatal(err)
+		}
+		if err := runMigrations(db, migrations); err == nil || !strings.Contains(err.Error(), "ledger has a gap") {
+			t.Fatalf("expected migration ledger gap rejection, got %v", err)
+		}
+	})
+}
+
+func TestMigrationDefinitionsMustBeStrictlyIncreasing(t *testing.T) {
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "order.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	migrations := []databaseMigration{
+		{version: 2, identity: "second", apply: func(*sql.Tx) error { return nil }},
+		{version: 1, identity: "first", apply: func(*sql.Tx) error { return nil }},
+	}
+	if err := runMigrations(db, migrations); err == nil || !strings.Contains(err.Error(), "strictly increasing") {
+		t.Fatalf("expected migration order rejection, got %v", err)
+	}
+}
 
 func TestOpenDatabaseUpgradesExistingVideosTable(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "legacy.db")
