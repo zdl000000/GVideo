@@ -121,6 +121,8 @@ API 验收会删除本轮视频、字幕、评论和互动。由于当前没有�
 docker compose -f compose.yaml -f compose.https.yaml config
 ```
 
+预检验证证书、Compose、Nginx 配置语法以及网关 readiness 链路的关键语义，但不启动完整服务。部署后必须分别检查 HTTPS `/gateway-healthz` 和 `/gateway-readyz`：前者仅表示 Nginx 存活，后者经 frontend 到达 backend `/readyz`。上游故障时 gateway 应保持存活但变为 `unhealthy`；Docker 不会仅因 healthcheck 失败自动重启容器。
+
 预检不会启动业务服务，也不会创建、删除或写入业务命名卷。
 
 ## 常见故障
