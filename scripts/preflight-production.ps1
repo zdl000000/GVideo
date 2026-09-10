@@ -163,15 +163,36 @@ try {
     $templateMount = "type=bind,source=$templatePath,target=/etc/nginx/templates/default.conf.template,readonly"
     $certificateMount = "type=bind,source=$certificatePath,target=/etc/nginx/tls/fullchain.pem,readonly"
     $privateKeyMount = "type=bind,source=$privateKeyPath,target=/etc/nginx/tls/privkey.pem,readonly"
-    docker run --rm --pull never `
-        -e "HTTPS_PORT=$httpsPort" `
-        -e "GVIDEO_HOST=$gvideoHost" `
-        --add-host "frontend:127.0.0.1" `
-        --mount $templateMount `
-        --mount $certificateMount `
-        --mount $privateKeyMount `
-        gvideo-gateway nginx -t
+    $gatewayValidationArgs = @(
+        "run", "--rm", "--pull", "never",
+        "-e", "HTTPS_PORT=$httpsPort",
+        "-e", "GVIDEO_HOST=$gvideoHost",
+        "--add-host", "frontend:127.0.0.1",
+        "--mount", $templateMount,
+        "--mount", $certificateMount,
+        "--mount", $privateKeyMount,
+        "gvideo-gateway"
+    )
+    & docker @gatewayValidationArgs nginx -t
     Assert-LastExitCode "Nginx rejected the rendered configuration or the TLS certificate/private key pair."
+
+    $renderedGatewayConfiguration = (& docker @gatewayValidationArgs nginx -T 2>&1 | Out-String)
+    Assert-LastExitCode "Nginx could not render the production gateway configuration."
+    $requiredGatewayPatterns = @{
+        "Docker DNS resolver" = 'resolver\s+127\.0\.0\.11\b[^;]*;'
+        "dynamic frontend upstream" = 'server\s+frontend:80\s+resolve;'
+        "gateway readiness endpoint" = 'location\s+=\s+/gateway-readyz\s*\{'
+        "backend readiness chain" = 'proxy_pass\s+http://gvideo_frontend/readyz;'
+        "short readiness timeout" = 'proxy_read_timeout\s+2s;'
+    }
+    foreach ($requirement in $requiredGatewayPatterns.GetEnumerator()) {
+        if ($renderedGatewayConfiguration -notmatch $requirement.Value) {
+            throw "Rendered Nginx configuration is missing $($requirement.Key)."
+        }
+    }
+    if ($renderedGatewayConfiguration -match 'proxy_next_upstream\s+[^;]*\bnon_idempotent\b') {
+        throw "Rendered Nginx configuration retries non-idempotent requests."
+    }
 
     $existingVolumes = @(docker volume ls --format "{{.Name}}")
     foreach ($volume in @($dataVolume, $mediaVolume)) {

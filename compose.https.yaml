@@ -27,8 +27,8 @@ services:
       - ${TLS_KEY_FILE:?set TLS_KEY_FILE to the TLS private key}:/etc/nginx/tls/privkey.pem:ro
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1/gateway-healthz >/dev/null && curl -kfsS https://127.0.0.1/gateway-healthz >/dev/null"]
+      test: ["CMD-SHELL", "curl --max-time 2 -fsS http://127.0.0.1/gateway-healthz >/dev/null && curl --max-time 2 -kfsS https://127.0.0.1/gateway-healthz >/dev/null && curl --max-time 3 -kfsS https://127.0.0.1/gateway-readyz >/dev/null"]
       interval: 10s
-      timeout: 3s
+      timeout: 8s
       retries: 5
       start_period: 10s

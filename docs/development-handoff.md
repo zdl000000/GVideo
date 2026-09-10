@@ -46,7 +46,7 @@ Pull Request [#16](https://github.com/zdl000000/GVideo/pull/16) 在提交 `cae1e
 
 本轮代码任务及 BASE-06 已完成。最终修复覆盖 access log 测试稳定性、媒体失败 metric/log 一致性、cleanup/startup 日志脱敏、预期 Worker gauge 缺失告警、低流量 backlog 恢复语义及交接状态，并已通过代码安全、可观测性和文档三方只读终审。Docker Compose 运行态、健康检查、停止宽限期、完整 API/浏览器验收、隔离备份恢复演练与 Linux/CGO race 均已有成功证据。
 
-后续独立队列为网关上游健康检查、播放器完整键盘模型、OpenAPI、安全扫描和更广泛的 E2E 覆盖；这些不再属于 BASE-06，也不阻断本轮分支进入合并审查。实际生产部署、密钥注入、TLS、监控产品接入与变更窗口仍需在目标环境按组织流程批准和执行。
+后续独立队列为播放器完整键盘模型、OpenAPI、安全扫描和更广泛的 E2E 覆盖；这些不再属于 BASE-06，也不阻断本轮分支进入合并审查。网关上游健康检查已完成实现与运行态验收：保留 Nginx liveness，并增加经 frontend 到 backend `/readyz` 的 readiness、动态 Docker DNS 解析和生产预检语义断言；backend 停止时 liveness 保持 200、readiness 返回非 2xx 且 gateway 进入 unhealthy，backend 恢复和 frontend 重建换址后 gateway 无需重建即可恢复 healthy。通过仅在显式设置 `E2E_IGNORE_HTTPS_ERRORS=true` 时允许自签证书的 Playwright 验证，HTTPS 网关页面测试为 7 项通过、1 项按条件跳过；生产默认仍严格校验证书。实际生产部署、密钥注入、TLS、监控产品接入与变更窗口仍需在目标环境按组织流程批准和执行。
 ## 6. 团队调度与验收
 
 - 总控执行写入、测试和 Git 操作；代码安全、可观测性和文档审查 Agent 只读并行。

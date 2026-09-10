@@ -142,9 +142,11 @@ docker compose -f compose.yaml -f compose.https.yaml config
 docker compose -f compose.yaml -f compose.https.yaml up --build -d
 ```
 
-生产预检会检查 HTTPS Origin、主机名、端口、管理员、固定卷名称、证书有效期、证书域名、证书与私钥匹配，并通过隔离的 `nginx -t` 验证网关配置。
+生产预检会检查 HTTPS Origin、主机名、端口、管理员、固定卷名称、证书有效期、证书域名、证书与私钥匹配，并通过隔离的 `nginx -t` 和渲染配置语义断言验证网关配置。预检不会启动完整服务，也不能替代运行态验收。
 
 生产入口应只公开网关端口。HTTP 使用 `308` 跳转 HTTPS，后端必须保持 `COOKIE_SECURE=true`。
+
+`/gateway-healthz` 只检查 Nginx HTTP/TLS 入口存活；`/gateway-readyz` 经 frontend 转发到 backend `/readyz`，检查完整上游链路和 SQLite readiness。生产负载均衡器应使用 HTTPS `/gateway-readyz` 决定是否分配新流量，并单独监控 `/gateway-healthz` 以区分网关故障和上游故障。Docker healthcheck 失败只会把容器标记为 `unhealthy`，`restart: unless-stopped` 不会因该状态自动重启容器。
 
 ## 云平台边界
 

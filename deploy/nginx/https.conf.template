@@ -11,6 +11,15 @@ map "$request_method:$uri" $gvideo_upload_limit_key {
 limit_req_zone $gvideo_auth_limit_key zone=gvideo_auth:10m rate=10r/m;
 limit_req_zone $gvideo_upload_limit_key zone=gvideo_upload:10m rate=2r/m;
 
+# Docker's embedded DNS keeps the gateway attached to a recreated frontend
+# container without requiring the gateway itself to be restarted.
+resolver 127.0.0.11 valid=10s ipv6=off;
+
+upstream gvideo_frontend {
+    zone gvideo_frontend 64k;
+    server frontend:80 resolve;
+}
+
 server {
     listen 80;
     server_name ${GVIDEO_HOST};
@@ -48,8 +57,18 @@ server {
         return 200 "ok\n";
     }
 
+    location = /gateway-readyz {
+        access_log off;
+        proxy_pass http://gvideo_frontend/readyz;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_connect_timeout 2s;
+        proxy_read_timeout 2s;
+        proxy_send_timeout 2s;
+    }
+
     location / {
-        proxy_pass http://frontend:80;
+        proxy_pass http://gvideo_frontend;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;

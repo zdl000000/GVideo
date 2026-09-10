@@ -56,7 +56,7 @@
 
 ## 部署、备份与恢复
 
-- 默认开发 Compose 的后端与前端端口只绑定 `127.0.0.1`。生产 HTTPS 通过独立 overlay 增加网关，HTTP 使用保留方法语义的 `308` 跳转，backend 必须覆盖为 `COOKIE_SECURE=true`；网关由 `HTTPS_PORT` 自动派生跳转端口后缀，healthcheck 必须同时探测 HTTP 和 HTTPS 入口。
+- 默认开发 Compose 的后端与前端端口只绑定 `127.0.0.1`。生产 HTTPS 通过独立 overlay 增加网关，HTTP 使用保留方法语义的 `308` 跳转，backend 必须覆盖为 `COOKIE_SECURE=true`；网关由 `HTTPS_PORT` 自动派生跳转端口后缀，healthcheck 必须同时探测 HTTP/HTTPS liveness 和经 frontend 到 backend `/readyz` 的 HTTPS readiness。网关必须动态解析重建后的 frontend 容器，readiness 使用短超时，且不得为登录、注册、上传等非幂等请求启用自动重试。
 - TLS 证书和私钥只能通过只读挂载或部署平台 secret 注入，不进入镜像、Compose 明文、环境变量值、Git 或备份包。HTTPS 网关必须保留上传大小、长请求超时和 `X-Forwarded-Proto=https`。
 - 合并 Compose 配置后必须检查最终端口、卷和 backend 环境，不能仅审查 overlay 源文件。基础前端端口即使保留，也只能绑定本机回环地址，不能成为公网 HTTP 绕过入口。
 - SQLite 在线备份使用 `VACUUM INTO`，禁止在 WAL 模式下只复制主 `.db` 文件。媒体归档必须通过只读卷挂载生成，不修改媒体卷，也不停止或删除现有容器和命名卷。
