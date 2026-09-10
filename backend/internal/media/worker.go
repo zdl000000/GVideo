@@ -48,18 +48,26 @@ func (w *Worker) WithStats(stats StatsRecorder) *Worker {
 func (w *Worker) Run(ctx context.Context) {
 	recovered, err := w.repo.RecoverTranscodingJobs(ctx, w.transcoder.Enabled())
 	if err != nil {
-		w.logger.Error("recover media jobs", "error", err)
+		w.logger.Error("media worker operation failed",
+			"event", "media_worker_error",
+			"stage", "recover",
+			"error_class", "storage_failed",
+		)
 		return
 	}
-	w.logger.Info("media worker started", "recovered_jobs", recovered, "poll_interval", w.pollInterval.String())
+	w.logger.Info("media worker started", "event", "media_worker_started", "recovered_jobs", recovered, "poll_interval", w.pollInterval.String())
 
 	for {
 		processed, err := w.processOne(ctx)
 		if err != nil && !errors.Is(err, context.Canceled) {
-			w.logger.Error("process media job", "error", err)
+			w.logger.Error("media worker operation failed",
+				"event", "media_worker_error",
+				"stage", "claim_or_persist",
+				"error_class", "storage_failed",
+			)
 		}
 		if ctx.Err() != nil {
-			w.logger.Info("media worker stopped")
+			w.logger.Info("media worker stopped", "event", "media_worker_stopped")
 			return
 		}
 		if processed {
@@ -85,20 +93,23 @@ func (w *Worker) processOne(ctx context.Context) (bool, error) {
 	if w.stats != nil {
 		w.stats.MediaJobClaimed()
 	}
-	w.logger.Info("media job started", "job_id", job.ID, "video_id", job.VideoID, "attempt", job.Attempts)
+	w.logJob(slog.LevelInfo, "media job started", "media_job_started", job.ID, job.VideoID, job.Attempts, "claimed", false, startedAt, "")
 	inputPath, err := resolveMediaPath(w.mediaDir, job.VideoPath)
 	if err != nil {
 		if w.stats != nil {
 			w.stats.MediaJobFailed("resolve")
 		}
 		if saveErr := w.repo.FailTranscodingJob(ctx, job.ID, job.VideoID, err.Error(), nil); saveErr != nil {
+			w.logJob(slog.LevelWarn, "media job failed", "media_job_failed", job.ID, job.VideoID, job.Attempts, "resolve", false, startedAt, "storage_failed")
 			return true, saveErr
 		}
+		w.logJob(slog.LevelWarn, "media job failed", "media_job_failed", job.ID, job.VideoID, job.Attempts, "resolve", false, startedAt, "invalid_media_path")
 		return true, nil
 	}
 	metadata, err := w.prober.Probe(ctx, inputPath)
 	if err != nil {
 		if ctx.Err() != nil {
+			w.logJob(slog.LevelInfo, "media job interrupted", "media_job_interrupted", job.ID, job.VideoID, job.Attempts, "probe", false, startedAt, "context_canceled")
 			return true, ctx.Err()
 		}
 		var retryAt *time.Time
@@ -107,20 +118,23 @@ func (w *Worker) processOne(ctx context.Context) (bool, error) {
 			retryAt = &next
 		}
 		if saveErr := w.repo.FailTranscodingJob(ctx, job.ID, job.VideoID, err.Error(), retryAt); saveErr != nil {
+			w.logJob(slog.LevelWarn, "media job failed", "media_job_failed", job.ID, job.VideoID, job.Attempts, "probe", retryAt != nil, startedAt, "storage_failed")
 			return true, saveErr
 		}
 		if w.stats != nil {
 			w.stats.MediaJobFailed("probe")
 		}
-		w.logger.Warn("media job failed", "job_id", job.ID, "video_id", job.VideoID, "attempt", job.Attempts, "retry", retryAt != nil, "error", err)
+		w.logJob(slog.LevelWarn, "media job failed", "media_job_failed", job.ID, job.VideoID, job.Attempts, "probe", retryAt != nil, startedAt, mediaErrorClass("probe", err))
 		return true, nil
 	}
 	if err := w.repo.UpdateTranscodingProgress(ctx, job.VideoID, 35, "transcoding"); err != nil {
+		w.logJob(slog.LevelWarn, "media job failed", "media_job_failed", job.ID, job.VideoID, job.Attempts, "transcode", false, startedAt, "storage_failed")
 		return true, err
 	}
 	hlsMasterPath, err := w.transcoder.Transcode(ctx, inputPath, job.VideoID, metadata)
 	if err != nil {
 		if ctx.Err() != nil {
+			w.logJob(slog.LevelInfo, "media job interrupted", "media_job_interrupted", job.ID, job.VideoID, job.Attempts, "transcode", false, startedAt, "context_canceled")
 			return true, ctx.Err()
 		}
 		var retryAt *time.Time
@@ -129,15 +143,17 @@ func (w *Worker) processOne(ctx context.Context) (bool, error) {
 			retryAt = &next
 		}
 		if saveErr := w.repo.FailTranscodingJob(ctx, job.ID, job.VideoID, err.Error(), retryAt); saveErr != nil {
+			w.logJob(slog.LevelWarn, "media job failed", "media_job_failed", job.ID, job.VideoID, job.Attempts, "transcode", retryAt != nil, startedAt, "storage_failed")
 			return true, saveErr
 		}
 		if w.stats != nil {
 			w.stats.MediaJobFailed("transcode")
 		}
-		w.logger.Warn("HLS transcode failed", "job_id", job.ID, "video_id", job.VideoID, "attempt", job.Attempts, "retry", retryAt != nil, "error", err)
+		w.logJob(slog.LevelWarn, "media job failed", "media_job_failed", job.ID, job.VideoID, job.Attempts, "transcode", retryAt != nil, startedAt, mediaErrorClass("transcode", err))
 		return true, nil
 	}
 	if err := w.repo.UpdateTranscodingProgress(ctx, job.VideoID, 90, "finalizing"); err != nil {
+		w.logJob(slog.LevelWarn, "media job failed", "media_job_failed", job.ID, job.VideoID, job.Attempts, "finalize", false, startedAt, "storage_failed")
 		return true, err
 	}
 	output := domain.MediaOutput{Metadata: metadata, HLSMasterPath: hlsMasterPath}
@@ -145,13 +161,37 @@ func (w *Worker) processOne(ctx context.Context) (bool, error) {
 		if w.stats != nil {
 			w.stats.MediaJobFailed("complete")
 		}
+		w.logJob(slog.LevelWarn, "media job failed", "media_job_failed", job.ID, job.VideoID, job.Attempts, "complete", false, startedAt, "storage_failed")
 		return true, err
 	}
 	if w.stats != nil {
 		w.stats.MediaJobCompleted(time.Since(startedAt))
 	}
-	w.logger.Info("media job completed", "job_id", job.ID, "video_id", job.VideoID, "duration", time.Since(startedAt), "width", metadata.Width, "height", metadata.Height, "hls_master_path", hlsMasterPath)
+	w.logJob(slog.LevelInfo, "media job completed", "media_job_completed", job.ID, job.VideoID, job.Attempts, "complete", false, startedAt, "")
 	return true, nil
+}
+
+func (w *Worker) logJob(level slog.Level, message, event string, jobID, videoID int64, attempt int, stage string, retry bool, startedAt time.Time, errorClass string) {
+	attributes := []any{
+		"event", event,
+		"job_id", jobID,
+		"video_id", videoID,
+		"attempt", attempt,
+		"stage", stage,
+		"retry", retry,
+		"duration_ms", time.Since(startedAt).Milliseconds(),
+	}
+	if errorClass != "" {
+		attributes = append(attributes, "error_class", errorClass)
+	}
+	w.logger.Log(context.Background(), level, message, attributes...)
+}
+
+func mediaErrorClass(stage string, err error) string {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return stage + "_timeout"
+	}
+	return stage + "_failed"
 }
 
 func resolveMediaPath(mediaDir, storedPath string) (string, error) {

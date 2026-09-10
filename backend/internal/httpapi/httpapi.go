@@ -74,8 +74,8 @@ func (h *Handler) Routes() http.Handler {
 	router := chi.NewRouter()
 	router.Use(h.instrument)
 	router.Use(h.requestID)
-	router.Use(h.recoverer)
 	router.Use(h.accessLog)
+	router.Use(h.recoverer)
 	router.Use(middleware.RealIP)
 	router.Use(middleware.Compress(5))
 	router.Use(h.responseHeaders)
@@ -140,7 +140,11 @@ func (h *Handler) media(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := h.service.AuthorizeMedia(r.Context(), cleanPath, viewerID(r.Context())); err != nil {
 		if !errors.Is(err, domain.ErrNotFound) {
-			h.logger.Error("authorize media", "request_id", requestID(r), "path", cleanPath, "error", err)
+			h.logger.Error("media authorization failed",
+				"event", "http_handler_error",
+				"request_id", requestID(r),
+				"error_class", "media_authorization_failed",
+			)
 		}
 		http.NotFound(w, r)
 		return
@@ -225,7 +229,11 @@ func (h *Handler) writeError(w http.ResponseWriter, r *http.Request, err error) 
 	case errors.Is(err, domain.ErrNotFound):
 		writeProblem(w, r, http.StatusNotFound, "内容不存在")
 	default:
-		h.logger.Error("request failed", "request_id", requestID(r), "error", err)
+		h.logger.Error("request failed",
+			"event", "http_handler_error",
+			"request_id", requestID(r),
+			"error_class", "internal_error",
+		)
 		writeProblem(w, r, http.StatusInternalServerError, "服务暂时不可用")
 	}
 }

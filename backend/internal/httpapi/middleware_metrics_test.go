@@ -35,3 +35,22 @@ func TestInstrumentRecordsRouteAndCommittedStatus(t *testing.T) {
 		t.Fatalf("request metric recorded an ignored second WriteHeader:\n%s", output)
 	}
 }
+
+func TestInstrumentNormalizesImplicitOKStatus(t *testing.T) {
+	registry := metrics.New()
+	handler := &Handler{metrics: registry}
+	router := chi.NewRouter()
+	router.Use(handler.instrument)
+	router.Get("/empty", func(http.ResponseWriter, *http.Request) {})
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/empty", nil))
+
+	output := registry.Render()
+	if !strings.Contains(output, `http_requests_total{method="GET",route="/empty",status="200"} 1`) {
+		t.Fatalf("implicit status was not normalized to 200:\n%s", output)
+	}
+	if strings.Contains(output, `status="0"`) {
+		t.Fatalf("metrics exposed status zero:\n%s", output)
+	}
+}

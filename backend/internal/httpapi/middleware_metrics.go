@@ -4,7 +4,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 )
 
@@ -19,11 +18,8 @@ func (h *Handler) instrument(next http.Handler) http.Handler {
 		start := time.Now()
 		wrapped := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
 		next.ServeHTTP(wrapped, r)
-		route := chi.RouteContext(r.Context()).RoutePattern()
-		if route == "" {
-			route = "unmatched"
-		}
-		h.metrics.IncHTTP(r.Method, route, wrapped.Status())
+		route := requestRoute(r)
+		h.metrics.IncHTTP(r.Method, route, normalizedHTTPStatus(wrapped.Status()))
 		h.metrics.ObserveHTTPDuration(route, time.Since(start).Seconds())
 	})
 }
