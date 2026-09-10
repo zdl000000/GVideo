@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 )
 
@@ -64,7 +65,7 @@ func (h *Handler) requireCSRF(next http.Handler) http.Handler {
 func (h *Handler) requestID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestID := strings.TrimSpace(r.Header.Get("X-Request-ID"))
-		if requestID == "" {
+		if !validRequestID(requestID) {
 			buffer := make([]byte, 12)
 			_, _ = rand.Read(buffer)
 			requestID = hex.EncodeToString(buffer)
@@ -74,11 +75,31 @@ func (h *Handler) requestID(next http.Handler) http.Handler {
 	})
 }
 
+func validRequestID(value string) bool {
+	if len(value) < 1 || len(value) > 128 {
+		return false
+	}
+	for _, character := range []byte(value) {
+		if (character >= 'a' && character <= 'z') ||
+			(character >= 'A' && character <= 'Z') ||
+			(character >= '0' && character <= '9') ||
+			character == '.' || character == '_' || character == ':' || character == '-' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
 func (h *Handler) recoverer(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
-			if recovered := recover(); recovered != nil {
-				h.logger.Error("panic recovered", "request_id", requestID(r), "panic", recovered)
+			if recover() != nil {
+				h.logger.Error("http panic recovered",
+					"event", "http_panic",
+					"request_id", requestID(r),
+					"error_class", "panic",
+				)
 				writeProblem(w, r, http.StatusInternalServerError, "服务暂时不可用")
 			}
 		}()
@@ -91,9 +112,31 @@ func (h *Handler) accessLog(next http.Handler) http.Handler {
 		wrapped := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
 		start := time.Now()
 		next.ServeHTTP(wrapped, r)
-		h.logger.Info("http request", "request_id", requestID(r), "method", r.Method, "path", r.URL.Path,
-			"status", wrapped.Status(), "bytes", wrapped.BytesWritten(), "duration_ms", time.Since(start).Milliseconds())
+		h.logger.Info("http request completed",
+			"event", "http_request",
+			"request_id", requestID(r),
+			"method", r.Method,
+			"route", requestRoute(r),
+			"status", normalizedHTTPStatus(wrapped.Status()),
+			"bytes", wrapped.BytesWritten(),
+			"duration_ms", time.Since(start).Milliseconds(),
+		)
 	})
+}
+
+func requestRoute(r *http.Request) string {
+	route := chi.RouteContext(r.Context()).RoutePattern()
+	if route == "" {
+		return "unmatched"
+	}
+	return route
+}
+
+func normalizedHTTPStatus(status int) int {
+	if status == 0 {
+		return http.StatusOK
+	}
+	return status
 }
 
 func (h *Handler) setSessionCookie(w http.ResponseWriter, token string) {
