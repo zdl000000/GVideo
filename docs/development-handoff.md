@@ -6,7 +6,7 @@
 
 ## 1. 当前状态
 
-开发队列实现已提交并推送至 `232ef29`。最终联合审查发现日志安全、媒体失败指标和告警契约存在缺口；当前工作区正在完成这些修复，修复必须重新通过目标测试、全仓静态门禁和只读联合复审后，才能显式暂存、提交并推送。不得使用 `git add .`，不得 amend、force push 或直接推送 main。
+开发队列和最终联合审查修复已完成：日志安全、媒体失败指标和告警契约缺口已在 `8be7007` 修复、通过目标测试与三方只读复审，并推送至远端分支。当前代码和本机静态门禁无阻断，剩余事项仅为需要外部可用环境和实际运行证据的 BASE-06 与 Linux/CGO race。后续仍不得使用 `git add .`，不得 amend、force push 或直接推送 main。
 
 BASE-06 运行态验收仍受外部环境阻塞：Docker Desktop Linux daemon 不可用，因此 Compose 启动、容器 `/livez`/`/readyz`、停止宽限期、API/浏览器验收及备份恢复演练尚未执行。Linux/CGO race workflow 已落地，但 GitHub Actions 的实际成功记录尚未核实。完成这些外部验收前，不得宣称生产发布验收通过。
 
@@ -24,7 +24,7 @@ BASE-06 运行态验收仍受外部环境阻塞：Docker Desktop Linux daemon �
 
 最近一次提交态完整静态门禁通过：全仓 Go test/vet、前端 14 个测试文件共 37 项测试、TypeScript typecheck、Vite build、Compose 静态配置渲染和 `git diff --check`。HLS 构建产物约 509.54 kB raw / 155.55 kB gzip，低于硬预算。
 
-最终联合审查修复产生于该门禁之后，必须重新运行目标测试和 `./scripts/check.ps1`；在重新验证前，上述结果不能视为当前工作区结论。Compose 静态渲染不启动容器，也不证明 Docker daemon、健康检查、停止行为或恢复流程正常。
+`8be7007` 提交后已再次运行并通过 `./scripts/check.ps1`：全仓 Go test/vet、前端 14 个测试文件共 37 项测试、TypeScript typecheck、Vite build、Compose 静态配置渲染和 `git diff --check` 均通过。Compose 静态渲染不启动容器，也不证明 Docker daemon、健康检查、停止行为或恢复流程正常。
 
 ## 4. 已完成队列
 
@@ -39,11 +39,11 @@ BASE-06 运行态验收仍受外部环境阻塞：Docker Desktop Linux daemon �
 9. `MODULE-01`：moderation 纵向模块。
 10. `FE-PERF-01`：HLS 动态加载 bundle 预算。
 11. `CI-01`：Ubuntu Backend Race Job workflow 实现；实际运行状态未核实，不得表述为 Linux race 已通过。
-12. `OPS-OBS-01A`～`01D`：存活/就绪端点、结构化日志及告警规格；最终审查修复完成并推送后才可视为封口。
+12. `OPS-OBS-01A`～`01D`：存活/就绪端点、结构化日志及告警规格；最终审查修复已在 `8be7007` 完成、复审并推送。
 
 ## 5. 当前任务与外部阻塞
 
-当前代码任务仅剩最终联合审查修复、验证、只读复审、显式暂存、提交和推送。修复范围包括：access log 测试稳定性、媒体失败 metric/log 一致性、cleanup/startup 日志脱敏、预期 Worker gauge 缺失告警、低流量 backlog 恢复语义及本交接状态。
+当前代码任务已完成。最终修复覆盖 access log 测试稳定性、媒体失败 metric/log 一致性、cleanup/startup 日志脱敏、预期 Worker gauge 缺失告警、低流量 backlog 恢复语义及交接状态，并已通过代码安全、可观测性和文档三方只读终审。剩余阻断均需要外部环境或平台运行证据。
 
 `BASE-06` 未完成，且是生产发布阻断项：
 
