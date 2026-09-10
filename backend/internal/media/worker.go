@@ -117,17 +117,20 @@ func (w *Worker) processOne(ctx context.Context) (bool, error) {
 			next := time.Now().Add(time.Duration(1<<(job.Attempts-1)) * 5 * time.Second)
 			retryAt = &next
 		}
-		if saveErr := w.repo.FailTranscodingJob(ctx, job.ID, job.VideoID, err.Error(), retryAt); saveErr != nil {
-			w.logJob(slog.LevelWarn, "media job failed", "media_job_failed", job.ID, job.VideoID, job.Attempts, "probe", retryAt != nil, startedAt, "storage_failed")
-			return true, saveErr
-		}
 		if w.stats != nil {
 			w.stats.MediaJobFailed("probe")
+		}
+		if saveErr := w.repo.FailTranscodingJob(ctx, job.ID, job.VideoID, err.Error(), retryAt); saveErr != nil {
+			w.logJob(slog.LevelWarn, "media job failed", "media_job_failed", job.ID, job.VideoID, job.Attempts, "probe", false, startedAt, "storage_failed")
+			return true, saveErr
 		}
 		w.logJob(slog.LevelWarn, "media job failed", "media_job_failed", job.ID, job.VideoID, job.Attempts, "probe", retryAt != nil, startedAt, mediaErrorClass("probe", err))
 		return true, nil
 	}
 	if err := w.repo.UpdateTranscodingProgress(ctx, job.VideoID, 35, "transcoding"); err != nil {
+		if w.stats != nil {
+			w.stats.MediaJobFailed("transcode")
+		}
 		w.logJob(slog.LevelWarn, "media job failed", "media_job_failed", job.ID, job.VideoID, job.Attempts, "transcode", false, startedAt, "storage_failed")
 		return true, err
 	}
@@ -142,17 +145,20 @@ func (w *Worker) processOne(ctx context.Context) (bool, error) {
 			next := time.Now().Add(time.Duration(1<<(job.Attempts-1)) * 5 * time.Second)
 			retryAt = &next
 		}
-		if saveErr := w.repo.FailTranscodingJob(ctx, job.ID, job.VideoID, err.Error(), retryAt); saveErr != nil {
-			w.logJob(slog.LevelWarn, "media job failed", "media_job_failed", job.ID, job.VideoID, job.Attempts, "transcode", retryAt != nil, startedAt, "storage_failed")
-			return true, saveErr
-		}
 		if w.stats != nil {
 			w.stats.MediaJobFailed("transcode")
+		}
+		if saveErr := w.repo.FailTranscodingJob(ctx, job.ID, job.VideoID, err.Error(), retryAt); saveErr != nil {
+			w.logJob(slog.LevelWarn, "media job failed", "media_job_failed", job.ID, job.VideoID, job.Attempts, "transcode", false, startedAt, "storage_failed")
+			return true, saveErr
 		}
 		w.logJob(slog.LevelWarn, "media job failed", "media_job_failed", job.ID, job.VideoID, job.Attempts, "transcode", retryAt != nil, startedAt, mediaErrorClass("transcode", err))
 		return true, nil
 	}
 	if err := w.repo.UpdateTranscodingProgress(ctx, job.VideoID, 90, "finalizing"); err != nil {
+		if w.stats != nil {
+			w.stats.MediaJobFailed("finalize")
+		}
 		w.logJob(slog.LevelWarn, "media job failed", "media_job_failed", job.ID, job.VideoID, job.Attempts, "finalize", false, startedAt, "storage_failed")
 		return true, err
 	}

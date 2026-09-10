@@ -1,168 +1,82 @@
 # GVideo 开发交接
 
-> 更新日期：2026-09-09
+> 更新日期：2026-09-10
 > 当前分支：`codex/architecture-hardening`
-> 交接原则：一个任务只解决一个问题；有文件、接口或数据契约冲突的任务必须串行。
+> 交接原则：实现、目标验证、只读复审、显式暂存、提交和推送必须串行；分支推送不代表生产发布获批。
 
-## 1. 当前任务
+## 1. 当前状态
 
-当前不是新增业务功能，而是封口架构加固批次：确认分层拆文件无行为变化，完成 metrics、独立管理端口、SQLite 迁移账本、前端路由懒加载和 HLS 动态加载的测试与联合验收，然后再提交并推送。
+开发队列实现已提交并推送至 `232ef29`。最终联合审查发现日志安全、媒体失败指标和告警契约存在缺口；当前工作区正在完成这些修复，修复必须重新通过目标测试、全仓静态门禁和只读联合复审后，才能显式暂存、提交并推送。不得使用 `git add .`，不得 amend、force push 或直接推送 main。
 
-当前工作区包含大量未提交、未跟踪的新拆分文件。提交前必须逐项核对并显式暂存，不能使用 `git add .`，也不能遗漏新文件。
+BASE-06 运行态验收仍受外部环境阻塞：Docker Desktop Linux daemon 不可用，因此 Compose 启动、容器 `/livez`/`/readyz`、停止宽限期、API/浏览器验收及备份恢复演练尚未执行。Linux/CGO race workflow 已落地，但 GitHub Actions 的实际成功记录尚未核实。完成这些外部验收前，不得宣称生产发布验收通过。
 
-## 2. 已完成
+## 2. 已完成的实现
 
-- 后端 Handler、Service、Repository 在原包内按职责拆文件，未改变公开 API。
-- 新增并发安全 metrics registry、HTTP/Worker 指标和队列深度 gauge。
-- metrics 与 pprof 使用独立管理端口，默认关闭；监听失败时启动即报错。
-- SQLite 新增 `schema_migrations` 账本、checksum、事务回滚、版本顺序和账本空洞校验。
-- React 页面使用 `lazy`/`Suspense`；`hls.js` 改为按需加载并增加卸载清理。
-- Compose、环境变量、部署与运维说明已同步；Vitest 暂时单 worker 运行以提高 Windows 稳定性。
-- 已清理无效 Git worktree 注册；当前只有主工作区。被 Codex 进程占用的空目录不影响 Git。
-- Context7 MCP 已完成 OAuth 接入；仅在查询第三方库最新 API 时使用，不阻塞当前批次。
+- 后端 Handler、Service、Repository 按职责拆分，并新增分层边界守卫。
+- metrics/pprof 使用独立、默认关闭且受生产地址校验保护的管理端口；端口占用时 fail-fast。
+- SQLite 迁移账本、checksum、事务回滚、历史夹具、迁移前一致快照和 fail-closed 备份已实现。
+- React 路由错误边界、播放器快捷键作用域、HLS 状态/重试/异步生命周期与 bundle 硬预算已实现。
+- moderation 举报审核已迁入独立纵向模块，公开 API 与数据库 schema 保持兼容。
+- `/livez`、`/readyz`、模板 route HTTP 指标/日志、媒体任务结构化日志和供应商无关告警 Runbook 已实现。
+- Compose `stop_grace_period` 和版本回退/真实命名卷恢复 Runbook 已实现；只有静态检查证据，没有运行态演练证据。
 
-## 3. 已验证
+## 3. 验证证据边界
 
-最近一次完整基线验证已通过：
+最近一次提交态完整静态门禁通过：全仓 Go test/vet、前端 14 个测试文件共 37 项测试、TypeScript typecheck、Vite build、Compose 静态配置渲染和 `git diff --check`。HLS 构建产物约 509.54 kB raw / 155.55 kB gzip，低于硬预算。
 
-- `./internal/httpapi`、`./internal/platform`、`./cmd/server` 目标 Go 测试。
-- 全仓 Go 测试和 `go vet`。
-- 前端 11 个测试文件、25 项测试、TypeScript 类型检查和 Vite production build。
-- Docker Compose 配置、PowerShell 脚本语法和 `git diff --check`。
+最终联合审查修复产生于该门禁之后，必须重新运行目标测试和 `./scripts/check.ps1`；在重新验证前，上述结果不能视为当前工作区结论。Compose 静态渲染不启动容器，也不证明 Docker daemon、健康检查、停止行为或恢复流程正常。
 
-非阻断警告：HLS 动态 chunk 约 509 kB，但未进入首页 preload，只在播放路径加载。
+## 4. 已完成队列
 
-完整浏览器/API 验收和 Go race 尚未在本轮最终状态上重新执行；race 需要 Linux/CGO 可用环境。
+1. `BASE-03A`：管理监听地址生产安全校验。
+2. `BASE-03B`：管理端口独立启停和端口冲突 fail-fast 测试。
+3. `OPS-01`：backend `stop_grace_period: 30s` 配置；运行态停止验证归入 BASE-06。
+4. `FE-01`～`FE-04`：懒加载错误边界、播放器快捷键作用域、HLS 状态与异步生命周期测试。
+5. `OPS-02`：应用回退和真实命名卷恢复 Runbook；隔离演练归入 BASE-06。
+6. `GUARD-01`、`GUARD-02`：后端 HTTP 持久层和前端 shared 反向依赖守卫。
+7. `CONTRACT-01`、`CONTRACT-02`：API 错误与 Auth API 契约。
+8. `DB-01`、`DB-02`：迁移夹具及迁移前备份门禁。
+9. `MODULE-01`：moderation 纵向模块。
+10. `FE-PERF-01`：HLS 动态加载 bundle 预算。
+11. `CI-01`：Ubuntu Backend Race Job workflow 实现；实际运行状态未核实，不得表述为 Linux race 已通过。
+12. `OPS-OBS-01A`～`01D`：存活/就绪端点、结构化日志及告警规格；最终审查修复完成并推送后才可视为封口。
 
-## 4. 当前阻断项
+## 5. 当前任务与外部阻塞
 
-总控已汇总架构、前端、后端、UI/UX、测试和 SRE 六方只读审查。后端拆文件等价性未发现阻断，但联合验收仍未通过。以下任务存在代码、测试或配置交集，必须严格按编号串行执行；每完成一项先跑目标测试并复审，再领取下一项。
+当前代码任务仅剩最终联合审查修复、验证、只读复审、显式暂存、提交和推送。修复范围包括：access log 测试稳定性、媒体失败 metric/log 一致性、cleanup/startup 日志脱敏、预期 Worker gauge 缺失告警、低流量 backlog 恢复语义及本交接状态。
 
-### BASE-03A 管理监听地址安全校验
+`BASE-06` 未完成，且是生产发布阻断项：
 
-状态：已完成（2026-09-09）。生产环境仅允许关闭、`localhost`、loopback 或 literal private IP；拒绝 wildcard、unspecified、公网 IP、任意 hostname 和非法端口。已通过 `go test ./internal/config -count=1`、`go vet ./internal/config` 与目标 `git diff --check`。
+- Docker Desktop Linux daemon 当前不可用。
+- 未执行 Compose 运行态启动和容器 `/livez`/`/readyz` 检查。
+- 未实测容器停止宽限期。
+- 未执行完整 API/浏览器验收和隔离备份恢复演练。
+- GitHub/Linux CGO race 实际状态未核实。
 
-- 唯一目标：生产环境拒绝 metrics/pprof 绑定 unspecified、wildcard 或公网地址，允许 loopback 和明确可信的私网地址。
-- 允许修改：`backend/internal/config/config.go`、`backend/internal/config/config_test.go`；仅在无法保持边界时最小修改 server 启动代码。
-- 禁止范围：指标格式、业务 HTTP 端口、Compose 网络和其他配置。
-- 验收：配置表格测试、目标 Go 测试和 `go vet`。
-
-### BASE-03B 管理端口启动测试
-
-- 前置依赖：BASE-03A 通过。
-- 唯一目标：自动验证 metrics/pprof 独立启停和端口占用时 fail-fast。
-- 允许修改：`backend/cmd/server` 内测试及为可测试性所需的最小无行为重构。
-- 禁止范围：管理端业务能力、HTTP 路由和部署配置。
-- 验收：目标包测试必须证明端口冲突非零失败；现有人工验证约 529ms 非零退出只作参考。
-
-### OPS-01 容器停止宽限期
-
-- 前置依赖：BASE-03B 通过。
-- 唯一目标：使 backend 容器停止宽限期长于应用 15 秒优雅关闭时间。
-- 允许修改：`compose.yaml` 及对应部署说明。
-- 建议值：`stop_grace_period: 30s`；同时确认媒体 Worker 能在该窗口退出。
-- 验收：Compose 渲染、脚本门禁；Docker 可用时执行一次停止验证。
-
-### FE-01 路由懒加载错误边界
-
-- 唯一目标：动态 chunk 加载失败时显示可恢复提示，不让路由区域直接崩溃。
-- 允许修改：`frontend/src/app/` 内相关实现与测试。
-- 禁止范围：路由结构、页面业务逻辑、视觉系统和后端。
-- 验收：失败路径测试、`npm test -- --run`、`npm run typecheck`、`npm run build`。
-- 回滚：删除新增错误边界并恢复原 `Suspense` 包装。
-
-### FE-02 播放器快捷键作用域
-
-- 前置依赖：FE-01 通过。
-- 唯一目标：Space 快捷键不劫持按钮、链接、表单控件或可编辑区域。
-- 允许修改：`VideoPlayer.tsx` 与对应目标测试。
-- 禁止范围：播放协议、HLS 生命周期和播放器视觉重构。
-- 验收：键盘目标测试及全量前端门禁。
-
-### FE-03 HLS 状态反馈
-
-- 前置依赖：FE-02 通过。
-- 唯一目标：为 HLS 准备、回退和最终失败提供可见且可读屏的状态与重试入口。
-- 允许修改：播放器、对应样式和目标测试。
-- 禁止范围：路由、后端媒体协议和其他页面。
-- 验收：状态转换、`aria-busy`/状态播报和重试测试。
-
-### FE-04 HLS 异步生命周期测试
-
-- 前置依赖：FE-03 通过，避免并行修改播放器和测试基础设施。
-- 唯一目标：为现有 HLS 动态加载和卸载逻辑补回归测试，不顺手重构播放器。
-- 允许修改：`frontend/src/features/watch/VideoPlayer.test.tsx`；仅在测试证明缺陷时最小修改 `VideoPlayer.tsx`。
-- 必测：import 完成前卸载、实例销毁、fetch abort、fatal/import 失败回退、卸载后不更新状态。
-- 验收：目标测试、全量前端测试、typecheck 和 build。
-
-### OPS-02 恢复与应用回滚 Runbook
-
-- 前置依赖：代码和 Compose 阻断项完成。
-- 唯一目标：记录版本回退、真实命名卷恢复、恢复后验证和失败处置流程。
-- 允许修改：部署、运维文档；若现有脚本无法安全支持，则另开脚本任务，不在文档任务中伪造已演练结论。
-- 验收：命令与现有脚本一致；Docker 可用后完成隔离演练，再决定是否批准生产发布。
-
-### BASE-06 运行态验收
-
-- 前置依赖：以上任务和全仓静态门禁全部通过。
-- 唯一目标：执行 Compose 启动、双健康检查、API/浏览器验收和备份恢复演练。
-- 当前阻塞环境：Docker Desktop daemon 未运行；这不是代码失败，但在完成前不得宣称生产验收通过。
-- Go race 另在 Linux/CGO 可用环境执行，本机未通过不应写成已通过。
-
-非当前批次问题只进入“后续队列”，不得顺手修改。包括 HTTP 空响应指标可能记录状态 `0`、Worker 指标专项测试、迁移 V1 冻结测试、`/livez`/`/readyz`、网关上游健康检查、播放器菜单返焦和完整键盘模型。
-
-## 5. 后续队列
-
-基线通过后按以下顺序推进，每次只领取一项：
-
-1. `GUARD-01`：已完成（2026-09-10）。`internal/httpapi` 的生产 Go 文件由 AST 静态测试禁止导入 `database/sql` 或 `internal/repository`；目标测试与 `go vet` 已通过。
-2. `GUARD-02`：已完成（2026-09-10）。`frontend/src/shared` 的生产模块由静态测试禁止反向导入 `features` 或 `app`；目标测试与 TypeScript 类型检查已通过。
-3. `CONTRACT-01`：已完成（2026-09-10）。`docs/api-error-contract.md` 已冻结目标成功/错误 envelope、稳定错误码、request ID 与兼容性规则；契约测试只验证规格模型和错误码注册表，未修改生产 Handler、Service 或现有 API 行为。
-4. `CONTRACT-02`：已完成（2026-09-10）。`docs/auth-api-contract.md` 已冻结注册、登录、登出和当前会话的请求/响应、Cookie、CSRF、安全及稳定错误码；契约测试只验证规格注册表和 JSON 模型，未修改生产 Handler、Service 或现有 API 行为。
-5. `DB-01`：已完成（2026-09-10）。新增冻结历史库 SQL 夹具及空库初始化、历史库升级、迁移失败事务回滚与重试、未来未知版本拒绝且零修改测试；未修改生产迁移代码或业务表结构。
-6. `DB-02`：已完成（2026-09-10）。后端对已有持久状态且存在待执行迁移的 SQLite 库，在任何迁移写入前创建、验证并以不覆盖既有文件的方式发布一致快照；备份失败 fail closed，未修改业务表结构。
-7. `MODULE-01`：已完成（2026-09-10）。视频举报与审核已按 Handler → Service → Repository → tests 单一纵向切片迁入 `internal/modules/moderation`；公开 API、认证/CSRF、HTTP envelope、稳定错误、重复举报更新语义和数据库 schema 保持不变。
-8. `FE-PERF-01`：已完成（2026-09-10）。HLS 继续保持播放路由内动态加载，并新增构建后唯一 chunk、550 kB raw、170 kB gzip 的硬预算；当前 Windows 实测约 509.53 kB / 157.47 kB。Vitest 多 worker 墙钟未稳定改善，继续保留单 worker 和关闭文件并行。
-9. `CI-01`：已完成（2026-09-10）。新增独立 Ubuntu Backend Race Job，以 `CGO_ENABLED=1` 执行 `go test -race ./... -count=1`；OpenAPI、迁移、E2E 和安全扫描仍保持为后续独立任务。
-10. `OPS-OBS-01A`：已完成（2026-09-10）。新增仅表示进程与 HTTP 服务可响应的 `/livez`；不探测 SQLite、媒体 Worker、队列或外部命令，`/healthz` 与 Compose 健康检查保持兼容。
-11. `OPS-OBS-01B`：已完成（2026-09-10）。新增 `/readyz`，仅检查启动初始化/迁移完成且 SQLite 可在 1 秒内响应；backend Compose healthcheck 已切换至该端点，Docker 运行态仍待可用环境验证。
-12. `OPS-OBS-01C`：已完成（2026-09-10）。request 日志使用模板 route、200 状态归一和固定结构字段；media job 日志统一生命周期字段与安全错误分类，不记录敏感请求内容、绝对路径或外部命令原文。
-13. `OPS-OBS-01D`：已完成（2026-09-10）。新增供应商无关的告警规格与 Runbook，覆盖实例不可用/readiness、HTTP 5xx、媒体失败增长及队列积压或未知值；未虚构已部署告警系统、备份时间戳或 Worker heartbeat。
-
-新功能模块要等当前基线和依赖/契约护栏稳定后再排期；若业务需求紧急，也必须以独立纵向切片进入，不能与架构迁移共享文件。
+网关上游健康检查、播放器完整键盘模型、OpenAPI、E2E 和安全扫描属于未来独立任务，不与本轮未完成验收混为一项。
 
 ## 6. 团队调度与验收
 
-- 总控：拆任务、分配文件边界、合并结论、执行最终验证和 Git 操作。
-- 架构师：只读审查模块边界、兼容性、安全、迁移与回滚；与总控共同签字。
-- 前端/后端：一次只允许一个有冲突风险的写任务；无文件和契约交集时最多两个写任务。
-- UI/UX、测试、SRE：默认只读并行审查；发现问题只提交证据和最小修复建议。
-- 每个写任务必须包含：唯一目标、前置依赖、允许修改文件、禁止范围、测试、回滚方式、已知未覆盖项。
-- 总控和架构师均给出“无阻断项”才可提交；若任一方拒绝，只修复其明确阻断项后复审。
+- 总控执行写入、测试和 Git 操作；代码安全、可观测性和文档审查 Agent 只读并行。
+- 任一审查发现阻断，只修复有证据的最小范围并重新运行相关验证。
+- 目标测试、全仓静态门禁和代码只读联合审查均无阻断后，可以提交并推送开发分支。
+- 生产发布批准仍需 BASE-06 和 Linux/CGO race 的实际成功证据。
 
 ## 7. 最终门禁与 Git
-
-每个原子任务先运行目标测试；批次完成后运行：
 
 ```powershell
 cd C:\Users\SkyShow\Documents\ChatGPT\GVideo
 .\scripts\check.ps1
 git diff --check
+git status -sb
 ```
 
-条件允许时再运行：
+提交前检查 `git status --short`，只显式暂存本批实际修改文件；运行 `git diff --cached --check` 后提交。推送使用：
 
 ```powershell
-.\scripts\acceptance-api.ps1
-.\scripts\acceptance.ps1 -SkipBuildChecks
+git -c http.version=HTTP/1.1 push -u origin codex/architecture-hardening
 ```
 
-提交前检查 `git status --short`，显式暂存本批文件，按单一意图拆分提交；不 amend、不 force push、不直接推 main。联合验收通过后推送：
+本机没有 GitHub CLI 时不虚构 PR。推送后可从以下地址创建 PR：
 
-```powershell
-git push -u origin codex/architecture-hardening
-```
-
-如本机没有 GitHub CLI，不虚构 PR；推送后可从以下地址创建 PR：
-
-`https://github.com/zdl000000/GVideo/compare/main...codex/architecture-hardening`
+https://github.com/zdl000000/GVideo/compare/main...codex/architecture-hardening

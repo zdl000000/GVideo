@@ -29,7 +29,7 @@ func (s *Service) removeMediaPath(storedPath string, recursive bool) {
 	}
 	resolved, err := resolveMediaPath(s.cfg.MediaDir, storedPath)
 	if err != nil {
-		s.logger.Warn("skip unsafe media cleanup", "path", storedPath, "error", err)
+		s.logger.Warn("media cleanup skipped", "event", "media_cleanup_failed", "error_class", "invalid_media_path")
 		return
 	}
 	if recursive {
@@ -38,7 +38,7 @@ func (s *Service) removeMediaPath(storedPath string, recursive bool) {
 		err = os.Remove(resolved)
 	}
 	if err != nil && !os.IsNotExist(err) {
-		s.logger.Warn("cleanup media asset", "path", storedPath, "error", err)
+		s.logger.Warn("media cleanup failed", "event", "media_cleanup_failed", "error_class", "filesystem_failed")
 	}
 }
 
