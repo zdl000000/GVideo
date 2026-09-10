@@ -33,7 +33,7 @@ services:
     restart: unless-stopped
     stop_grace_period: 30s
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/readyz"]
       interval: 10s
       timeout: 3s
       retries: 5
