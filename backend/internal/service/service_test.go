@@ -548,6 +548,65 @@ func TestPublicVideoSanitizesProcessingFailure(t *testing.T) {
 	}
 }
 
+func TestRemoveMediaPathLogsSafeContract(t *testing.T) {
+	tests := []struct {
+		name       string
+		mediaDir   func(t *testing.T) string
+		storedPath string
+		recursive  bool
+		wantClass  string
+	}{
+		{
+			name:       "invalid path",
+			mediaDir:   func(t *testing.T) string { return t.TempDir() },
+			storedPath: filepath.Join("..", "private", "cleanup-path-canary"),
+			wantClass:  "invalid_media_path",
+		},
+		{
+			name: "filesystem failure",
+			mediaDir: func(t *testing.T) string {
+				root := t.TempDir()
+				if err := os.Mkdir(filepath.Join(root, "non-empty-cleanup-canary"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(root, "non-empty-cleanup-canary", "child"), []byte("x"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				return root
+			},
+			storedPath: "non-empty-cleanup-canary",
+			wantClass:  "filesystem_failed",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var output bytes.Buffer
+			logger := slog.New(slog.NewJSONHandler(&output, nil))
+			svc := &Service{cfg: config.Config{MediaDir: test.mediaDir(t)}, logger: logger}
+			svc.removeMediaPath(test.storedPath, test.recursive)
+
+			var record map[string]any
+			if err := json.Unmarshal(bytes.TrimSpace(output.Bytes()), &record); err != nil {
+				t.Fatalf("decode cleanup log: %v; output=%q", err, output.String())
+			}
+			if record["event"] != "media_cleanup_failed" || record["error_class"] != test.wantClass {
+				t.Fatalf("unexpected cleanup log: %#v", record)
+			}
+			for _, forbidden := range []string{"path", "error"} {
+				if _, exists := record[forbidden]; exists {
+					t.Fatalf("unsafe field %q present: %#v", forbidden, record)
+				}
+			}
+			for _, canary := range []string{"cleanup-path-canary", "non-empty-cleanup-canary", test.storedPath, svc.cfg.MediaDir} {
+				if canary != "" && strings.Contains(output.String(), canary) {
+					t.Fatalf("cleanup log leaked %q: %s", canary, output.String())
+				}
+			}
+		})
+	}
+}
+
 func TestVideoManagementLifecycle(t *testing.T) {
 	dir := t.TempDir()
 	mediaDir := filepath.Join(dir, "media")

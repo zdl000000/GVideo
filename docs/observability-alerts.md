@@ -38,7 +38,7 @@
 
 ### MediaJobFailuresGrowing
 
-- **查询/信号依据**：`failures = sum(increase(media_jobs_total{event begins with "failed:"}, 10m))`；当 `failures >= 3` 告警。按实际 event（如 `failed:probe`、`failed:transcode`、`failed:complete`）分解以定位阶段。此 counter 统计已归类的任务失败，不是 Worker heartbeat。
+- **查询/信号依据**：`failures = sum(increase(media_jobs_total{event begins with "failed:"}, 10m))`；当 `failures >= 3` 告警。按实际 event（`failed:resolve`、`failed:probe`、`failed:transcode`、`failed:finalize`、`failed:complete`）分解以定位阶段。此 counter 统计失败处理尝试（包括可重试尝试和持久化失败），不是去重后的失败任务数，也不是 Worker heartbeat。
 - **时间窗口**：10 分钟滚动窗口，条件持续 5 分钟。
 - **严重级别**：Warning；`failures >= 10`、所有新任务均失败，或同时出现队列积压时提升为 Critical。
 - **原因**：失败增长可能来自无效媒体、probe/transcode 故障、存储写入失败或数据库问题。单次失败可能是输入问题，因此初始阈值允许少量孤立失败。
@@ -54,17 +54,28 @@
 - **原因**：生产速度低于入队速度，可能由 Worker 未运行、转码变慢、媒体/数据卷性能下降或突发上传导致。
 - **第一检查**：确认部署确实启用了媒体 Worker，再比较 claimed/completed/failed 的 counter 增量，检查 CPU、内存、磁盘容量和 I/O，以及最近 `media_job_*` 日志；`/readyz` 为 200 不能排除 Worker 故障。
 - **升级条件**：达到 Critical 阈值、最老任务等待超过业务目标、队列只增不减 30 分钟，或资源耗尽风险上升时升级给容量与媒体处理负责人。
-- **恢复判定**：深度连续 15 分钟低于 10 且 completed counter 持续增长；若流量停止才下降，还需确认 Worker 能完成一个新任务。
+- **恢复判定**：队列深度连续 15 分钟低于 10；若该窗口内存在 claimed 任务，则 completed counter 必须产生相应增量且队列不再持续增长。若队列为空或处于低流量期，没有自然任务可供判断，则通过一次受控任务成功领取并完成来确认恢复，不要求空闲期间 completed counter 持续增长。`0` 是成功查询到的空队列；指标缺失与 `-1` 分别由下述规则处理。
 
 ### MediaQueueDepthUnknown
 
-- **查询/信号依据**：在预期启用媒体 Worker 的实例上，`media_queue_depth == -1`。`-1` 是 gauge 查询 SQLite 失败或超过 2 秒的明确哨兵值。指标缺失与 `-1` 不同：缺失时先核对 metrics/Worker 配置及采集状态，并由 `BackendUnavailableOrNotReady` 处理采集失败。
+- **查询/信号依据**：在预期启用媒体 Worker 的实例上，`media_queue_depth == -1`。`-1` 是 gauge 查询 SQLite 失败或超过 2 秒的明确哨兵值。指标缺失与 `-1` 不同：采集失败由 `BackendUnavailableOrNotReady` 处理；采集成功但预期 gauge 缺失由 `MediaQueueDepthMissing` 处理。
 - **时间窗口**：连续 3 次采集且至少持续 2 分钟。
 - **严重级别**：Critical。
 - **原因**：监控无法读取真实队列深度，通常表示 SQLite 查询、连接或数据卷异常；此时积压告警也失去可信输入。
 - **第一检查**：检查 `/readyz`、SQLite/数据卷状态、查询超时和进程日志，再确认该实例的 `MEDIA_WORKER_ENABLED` 与 `METRICS_ADDR` 配置；不要把未启用 Worker 的实例缺少 gauge 当作数据库故障。
 - **升级条件**：`/readyz` 同时失败、所有 Worker 实例均为 `-1`、出现存储错误日志，或 5 分钟内未恢复时升级给数据库/平台负责人。
 - **恢复判定**：gauge 连续 5 分钟为非负值，并确认队列值随一次受控任务的领取/完成产生合理变化。
+
+
+### MediaQueueDepthMissing
+
+- **查询/信号依据**：部署 inventory 或静态角色标签表明实例预期启用媒体 Worker，且 `scrape_success(instance) == 1`，但本次采集中不存在 `media_queue_depth`。指标缺失不同于正常值 `0` 和数据库查询失败哨兵值 `-1`。
+- **时间窗口**：连续 3 次采集且至少持续 2 分钟。
+- **严重级别**：Warning；所有预期 Worker 实例均缺失，或持续 10 分钟时提升为 Critical。
+- **原因**：可能是 `MEDIA_WORKER_ENABLED`/`METRICS_ADDR` 配置漂移、部署角色标记错误、指标注册回归，或采集目标与预期实例不一致。该信号不是 Worker heartbeat，不能证明进程正在领取任务。
+- **第一检查**：核对部署 inventory、实例环境变量和 `/metrics` 原始输出，确认采集目标对应正确版本；再检查启动日志和 Worker 配置。不要把缺失值按 `0` 处理。
+- **升级条件**：所有预期 Worker 均缺失、与队列积压或任务失败同时发生、部署后持续 10 分钟，或指标契约发生未计划变化时升级给平台和媒体处理负责人。
+- **恢复判定**：预期 Worker 实例的 gauge 连续 5 分钟重新出现并为合法值；`-1` 应转入 `MediaQueueDepthUnknown`，非负值还需结合一次受控任务或实际任务验证变化合理。
 
 ## 事件处理通用要求
 

@@ -88,7 +88,8 @@ func TestWorkerStructuredJobLogs(t *testing.T) {
 			}
 
 			var output bytes.Buffer
-			worker := NewWorker(repo, test.prober, test.transcoder, t.TempDir(), time.Millisecond, slog.New(slog.NewJSONHandler(&output, nil)))
+			stats := &workerLogStats{}
+			worker := NewWorker(repo, test.prober, test.transcoder, t.TempDir(), time.Millisecond, slog.New(slog.NewJSONHandler(&output, nil))).WithStats(stats)
 			worker.maxAttempts = test.maxAttempts
 			processed, err := worker.processOne(ctx)
 			if err != nil || !processed {
@@ -249,7 +250,7 @@ func TestWorkerStorageFailureLogsSafeContract(t *testing.T) {
 			name: "probe failure persistence",
 			triggerSQL: `CREATE TRIGGER reject_pending_job BEFORE UPDATE ON transcoding_jobs
 				WHEN NEW.status = 'pending' BEGIN SELECT RAISE(FAIL, 'C:\secret\db token=storage-canary'); END`,
-			videoPath: "videos/input.mp4", prober: fakeProber{err: errors.New("probe failure")}, maxAttempts: 2, wantStage: "probe", wantRetry: true,
+			videoPath: "videos/input.mp4", prober: fakeProber{err: errors.New("probe failure")}, maxAttempts: 2, wantStage: "probe", wantRetry: false,
 		},
 		{
 			name: "transcode progress persistence",
@@ -284,7 +285,8 @@ func TestWorkerStorageFailureLogsSafeContract(t *testing.T) {
 				t.Fatal(err)
 			}
 			var output bytes.Buffer
-			worker := NewWorker(repo, test.prober, test.transcoder, t.TempDir(), time.Millisecond, slog.New(slog.NewJSONHandler(&output, nil)))
+			stats := &workerLogStats{}
+			worker := NewWorker(repo, test.prober, test.transcoder, t.TempDir(), time.Millisecond, slog.New(slog.NewJSONHandler(&output, nil))).WithStats(stats)
 			worker.maxAttempts = test.maxAttempts
 			if worker.maxAttempts == 0 {
 				worker.maxAttempts = 1
@@ -298,6 +300,9 @@ func TestWorkerStorageFailureLogsSafeContract(t *testing.T) {
 			assertWorkerLog(t, terminal, "media_job_failed", test.wantStage, test.wantRetry, video.ID)
 			if terminal["error_class"] != "storage_failed" {
 				t.Fatalf("error_class=%v", terminal["error_class"])
+			}
+			if len(stats.failedStages) != 1 || stats.failedStages[0] != test.wantStage {
+				t.Fatalf("failed metric stages=%v, want [%s]", stats.failedStages, test.wantStage)
 			}
 			if strings.Contains(output.String(), "storage-canary") || strings.Contains(output.String(), `C:\secret`) {
 				t.Fatalf("storage error leaked: %s", output.String())
@@ -345,4 +350,14 @@ func createLoggedWorkerJob(t *testing.T, username, videoPath string) (*sql.DB, *
 		t.Fatal(err)
 	}
 	return db, repo, video
+}
+
+type workerLogStats struct {
+	failedStages []string
+}
+
+func (*workerLogStats) MediaJobClaimed()                {}
+func (*workerLogStats) MediaJobCompleted(time.Duration) {}
+func (s *workerLogStats) MediaJobFailed(stage string) {
+	s.failedStages = append(s.failedStages, stage)
 }

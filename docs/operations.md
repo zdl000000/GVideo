@@ -8,7 +8,7 @@
 .\scripts\check.ps1
 ```
 
-检查内容包括 PowerShell 语法、Docker Compose 配置、Go 格式与测试、`go vet`、Vitest、TypeScript 类型检查、Vite 生产构建和 `git diff --check`。
+检查内容包括 PowerShell 语法、Docker Compose 静态配置渲染（不启动容器，也不证明 Docker daemon 或运行态健康）、Go 格式与测试、`go vet`、Vitest、TypeScript 类型检查、Vite 生产构建和 `git diff --check`。
 
 ## 管理诊断端点
 
@@ -30,7 +30,7 @@ go run ./cmd/server
 
 供应商无关的初始阈值、查询语义、升级条件与恢复判定见 [observability-alerts.md](observability-alerts.md)，结构化日志字段见 [observability.md](observability.md)。这些文档是监控接入规格，不表示仓库已经部署告警产品。
 
-部署监控前必须启用受保护的 `METRICS_ADDR`，配置 `/metrics` 采集和 `/livez`、`/readyz` 外部探测，并按部署角色确认 `media_queue_depth` 是否应存在。当前没有备份成功时间戳指标或 Worker heartbeat；不得用文件时间、进程存活或 `/readyz` 冒充这些信号。
+部署监控前必须启用受保护的 `METRICS_ADDR`，配置 `/metrics` 采集和 `/livez`、`/readyz` 外部探测，并按部署角色确认 `media_queue_depth` 是否应存在。对预期启用 Worker 的实例，必须分别监控 gauge 缺失、`-1` 和非负值：缺失表示配置或指标契约异常，`-1` 表示队列查询失败，`0` 表示已成功查询且当前无排队任务。当前没有备份成功时间戳指标或 Worker heartbeat；不得用文件时间、进程存活或 `/readyz` 冒充这些信号。
 
 ## 完整验收
 

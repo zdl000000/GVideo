@@ -40,11 +40,11 @@ func main() {
 
 	db, err := platform.OpenDatabase(cfg.DatabasePath)
 	if err != nil {
-		logger.Error("open database", "error", err)
+		logger.Error("storage initialization failed", "event", "storage_initialization_failed", "error_class", "storage_failed")
 		os.Exit(1)
 	}
 	defer db.Close()
-	logger.Info("storage initialized", "database_path", cfg.DatabasePath, "media_dir", cfg.MediaDir)
+	logger.Info("storage initialized", "event", "storage_initialized")
 
 	repo := repository.New(db)
 	svc := service.New(repo, cfg, logger)

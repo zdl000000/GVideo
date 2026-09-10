@@ -6,12 +6,31 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"gvideo/backend/internal/platform/metrics"
 )
+
+func TestStartupStorageLogsDoNotExposePaths(t *testing.T) {
+	source, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(source)
+	for _, forbidden := range []string{`"database_path"`, `"media_dir"`, `logger.Error("open database", "error", err)`} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("startup storage logging contains unsafe pattern %q", forbidden)
+		}
+	}
+	for _, required := range []string{`"event", "storage_initialized"`, `"event", "storage_initialization_failed"`, `"error_class", "storage_failed"`} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("startup storage logging missing safe pattern %q", required)
+		}
+	}
+}
 
 func TestStartAdminServersSupportsIndependentEnablement(t *testing.T) {
 	tests := []struct {

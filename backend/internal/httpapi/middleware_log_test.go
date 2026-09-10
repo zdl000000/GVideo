@@ -38,10 +38,20 @@ func TestAccessLogUsesStableRouteAndSafeFields(t *testing.T) {
 	assertLogNumber(t, record, "status", http.StatusCreated)
 	assertLogNumber(t, record, "bytes", 2)
 	assertNonNegativeLogNumber(t, record, "duration_ms")
-	if record["request_id"] == "" {
-		t.Fatal("request_id is empty")
+	requestID, exists := record["request_id"].(string)
+	if !exists || !validRequestID(requestID) {
+		t.Fatalf("request_id is missing or invalid: %#v", record["request_id"])
 	}
-	for _, forbidden := range []string{"path", "url", "query", "authorization", "cookie", "password", "csrf", "42", "query-secret", "authorization-secret", "cookie-secret"} {
+	allowedKeys := map[string]bool{
+		"time": true, "level": true, "msg": true, "event": true, "request_id": true,
+		"method": true, "route": true, "status": true, "bytes": true, "duration_ms": true,
+	}
+	for key := range record {
+		if !allowedKeys[key] {
+			t.Fatalf("request log contains unexpected field %q: %#v", key, record)
+		}
+	}
+	for _, forbidden := range []string{"query-secret", "authorization-secret", "cookie-secret", "csrf-secret", "/videos/42"} {
 		if strings.Contains(strings.ToLower(output.String()), forbidden) {
 			t.Fatalf("request log contains forbidden value %q: %s", forbidden, output.String())
 		}
