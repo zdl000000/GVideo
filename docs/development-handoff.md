@@ -6,10 +6,7 @@
 
 ## 1. 当前状态
 
-开发队列和最终联合审查修复已完成：日志安全、媒体失败指标和告警契约缺口已在 `8be7007` 修复、通过目标测试与三方只读复审，并推送至远端分支。当前代码和本机静态门禁无阻断，剩余事项仅为需要外部可用环境和实际运行证据的 BASE-06 与 Linux/CGO race。后续仍不得使用 `git add .`，不得 amend、force push 或直接推送 main。
-
-BASE-06 运行态验收仍受外部环境阻塞：Docker Desktop Linux daemon 不可用，因此 Compose 启动、容器 `/livez`/`/readyz`、停止宽限期、API/浏览器验收及备份恢复演练尚未执行。Linux/CGO race workflow 已落地，但 GitHub Actions 的实际成功记录尚未核实。完成这些外部验收前，不得宣称生产发布验收通过。
-
+开发队列、最终联合审查修复和 BASE-06 运行态验收均已完成。Docker Compose 镜像构建、容器健康、健康端点、30 秒停止宽限期、完整 API/浏览器验收、媒体处理与隔离备份恢复演练均已取得实际运行证据；Pull Request #16 触发的 Linux/CGO race 也已成功。当前分支满足本轮代码与运行态发布门禁，实际生产部署仍需按组织变更流程单独批准。后续仍不得使用 `git add .`，不得 amend、force push 或直接推送 main。
 ## 2. 已完成的实现
 
 - 后端 Handler、Service、Repository 按职责拆分，并新增分层边界守卫。
@@ -18,14 +15,17 @@ BASE-06 运行态验收仍受外部环境阻塞：Docker Desktop Linux daemon �
 - React 路由错误边界、播放器快捷键作用域、HLS 状态/重试/异步生命周期与 bundle 硬预算已实现。
 - moderation 举报审核已迁入独立纵向模块，公开 API 与数据库 schema 保持兼容。
 - `/livez`、`/readyz`、模板 route HTTP 指标/日志、媒体任务结构化日志和供应商无关告警 Runbook 已实现。
-- Compose `stop_grace_period` 和版本回退/真实命名卷恢复 Runbook 已实现；只有静态检查证据，没有运行态演练证据。
+- Compose `stop_grace_period` 和版本回退/真实命名卷恢复 Runbook 已实现；停止宽限期与隔离备份恢复已取得运行态演练证据。
 
 ## 3. 验证证据边界
 
-最近一次提交态完整静态门禁通过：全仓 Go test/vet、前端 14 个测试文件共 37 项测试、TypeScript typecheck、Vite build、Compose 静态配置渲染和 `git diff --check`。HLS 构建产物约 509.54 kB raw / 155.55 kB gzip，低于硬预算。
+`8be7007` 提交后已运行并通过 `./scripts/check.ps1`：全仓 Go test/vet、前端 14 个测试文件共 37 项测试、TypeScript typecheck、Vite build、Compose 静态配置渲染和 `git diff --check` 均通过。HLS 构建产物约 509.54 kB raw / 155.55 kB gzip，低于硬预算。最终交接提交前再次执行同一完整静态门禁。
 
-`8be7007` 提交后已再次运行并通过 `./scripts/check.ps1`：全仓 Go test/vet、前端 14 个测试文件共 37 项测试、TypeScript typecheck、Vite build、Compose 静态配置渲染和 `git diff --check` 均通过。Compose 静态渲染不启动容器，也不证明 Docker daemon、健康检查、停止行为或恢复流程正常。
+2026-09-10 的 BASE-06 运行证据：`docker compose up --build -d` 成功，backend/frontend 均为 `running|healthy|0`；`/livez`、`/readyz`、backend `/healthz`、同源 `/healthz` 和首页均返回 HTTP 200。backend 以 30 秒超时停止时在 16.96 秒内收到 SIGTERM（signal 15）并以 exit 0、OOMKilled=false 退出，无 SIGKILL，随后恢复 healthy。
 
+`./scripts/acceptance.ps1 -SkipBuildChecks -IncludeBackupRestore -KeepDrillBackup` 在 05:41 内通过：完整 API 用户旅程、实际 FFmpeg/HLS/字幕/Range 验收通过，Playwright 7 项通过、1 项按条件跳过，隔离备份恢复演练及数据库/媒体 SHA-256 校验通过。审计备份保留在被 Git 忽略的 `backups/gvideo-drill-20260910-081404-350Z-31aac034f7e844fc862ee4e9ac75b8e9/`。
+
+Pull Request [#16](https://github.com/zdl000000/GVideo/pull/16) 在提交 `cae1e679c9fe8ac002db6cac57709629a4e23161` 上触发 [CI run 34454478806](https://github.com/zdl000000/GVideo/actions/runs/34454478806)，Backend、Frontend 和启用 `CGO_ENABLED=1` 的 [Backend Race](https://github.com/zdl000000/GVideo/actions/runs/34454478806/job/102797561522) 均成功。
 ## 4. 已完成队列
 
 1. `BASE-03A`：管理监听地址生产安全校验。
@@ -38,29 +38,21 @@ BASE-06 运行态验收仍受外部环境阻塞：Docker Desktop Linux daemon �
 8. `DB-01`、`DB-02`：迁移夹具及迁移前备份门禁。
 9. `MODULE-01`：moderation 纵向模块。
 10. `FE-PERF-01`：HLS 动态加载 bundle 预算。
-11. `CI-01`：Ubuntu Backend Race Job workflow 实现；实际运行状态未核实，不得表述为 Linux race 已通过。
+11. `CI-01`：Ubuntu Backend Race Job workflow 已实现，并由 Pull Request #16 在 Linux/CGO 环境实际运行通过。
 12. `OPS-OBS-01A`～`01D`：存活/就绪端点、结构化日志及告警规格；最终审查修复已在 `8be7007` 完成、复审并推送。
+13. `BASE-06`：Compose 运行态、健康检查、优雅停止、完整验收、隔离备份恢复和 Linux/CGO race 证据闭环。
 
-## 5. 当前任务与外部阻塞
+## 5. 当前任务与后续队列
 
-当前代码任务已完成。最终修复覆盖 access log 测试稳定性、媒体失败 metric/log 一致性、cleanup/startup 日志脱敏、预期 Worker gauge 缺失告警、低流量 backlog 恢复语义及交接状态，并已通过代码安全、可观测性和文档三方只读终审。剩余阻断均需要外部环境或平台运行证据。
+本轮代码任务及 BASE-06 已完成。最终修复覆盖 access log 测试稳定性、媒体失败 metric/log 一致性、cleanup/startup 日志脱敏、预期 Worker gauge 缺失告警、低流量 backlog 恢复语义及交接状态，并已通过代码安全、可观测性和文档三方只读终审。Docker Compose 运行态、健康检查、停止宽限期、完整 API/浏览器验收、隔离备份恢复演练与 Linux/CGO race 均已有成功证据。
 
-`BASE-06` 未完成，且是生产发布阻断项：
-
-- Docker Desktop Linux daemon 当前不可用。
-- 未执行 Compose 运行态启动和容器 `/livez`/`/readyz` 检查。
-- 未实测容器停止宽限期。
-- 未执行完整 API/浏览器验收和隔离备份恢复演练。
-- GitHub/Linux CGO race 实际状态未核实。
-
-网关上游健康检查、播放器完整键盘模型、OpenAPI、E2E 和安全扫描属于未来独立任务，不与本轮未完成验收混为一项。
-
+后续独立队列为网关上游健康检查、播放器完整键盘模型、OpenAPI、安全扫描和更广泛的 E2E 覆盖；这些不再属于 BASE-06，也不阻断本轮分支进入合并审查。实际生产部署、密钥注入、TLS、监控产品接入与变更窗口仍需在目标环境按组织流程批准和执行。
 ## 6. 团队调度与验收
 
 - 总控执行写入、测试和 Git 操作；代码安全、可观测性和文档审查 Agent 只读并行。
 - 任一审查发现阻断，只修复有证据的最小范围并重新运行相关验证。
 - 目标测试、全仓静态门禁和代码只读联合审查均无阻断后，可以提交并推送开发分支。
-- 生产发布批准仍需 BASE-06 和 Linux/CGO race 的实际成功证据。
+- BASE-06 与 Linux/CGO race 已取得实际成功证据；合并和实际生产部署仍遵循仓库审查与组织变更批准。
 
 ## 7. 最终门禁与 Git
 
