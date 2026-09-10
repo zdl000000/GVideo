@@ -17,6 +17,7 @@ import (
 	"gvideo/backend/internal/media"
 	"gvideo/backend/internal/modules/moderation"
 	"gvideo/backend/internal/platform"
+	platformhealth "gvideo/backend/internal/platform/health"
 	"gvideo/backend/internal/platform/metrics"
 	"gvideo/backend/internal/repository"
 	"gvideo/backend/internal/service"
@@ -49,7 +50,7 @@ func main() {
 	svc := service.New(repo, cfg, logger)
 	moderationService := moderation.NewService(moderation.NewRepository(db), cfg.AdminUsername)
 	registry := metrics.New()
-	handler := httpapi.New(svc, moderationService, cfg, logger, registry)
+	handler := httpapi.New(svc, moderationService, cfg, logger, registry).WithReadiness(platformhealth.NewReadiness(db))
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           handler.Routes(),

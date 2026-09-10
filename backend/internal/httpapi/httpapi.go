@@ -30,9 +30,14 @@ type contextKey string
 
 const sessionKey contextKey = "session"
 
+type ReadinessChecker interface {
+	Ready(context.Context) error
+}
+
 type Handler struct {
 	service    *service.Service
 	moderation *moderation.Handler
+	readiness  ReadinessChecker
 	cfg        config.Config
 	logger     *slog.Logger
 	metrics    *metrics.Registry
@@ -57,6 +62,11 @@ func New(service *service.Service, moderationService *moderation.Service, cfg co
 	return h
 }
 
+func (h *Handler) WithReadiness(checker ReadinessChecker) *Handler {
+	h.readiness = checker
+	return h
+}
+
 func (h *Handler) Routes() http.Handler {
 	if err := os.MkdirAll(h.cfg.MediaDir, 0o755); err != nil {
 		panic(fmt.Errorf("create media directory: %w", err))
@@ -73,6 +83,7 @@ func (h *Handler) Routes() http.Handler {
 
 	router.Get("/", h.root)
 	router.Get("/livez", h.livez)
+	router.Get("/readyz", h.readyz)
 	// /healthz remains an alias for clients and deployments that predate /livez.
 	router.Get("/healthz", h.livez)
 	router.Get("/media/*", h.media)
@@ -176,6 +187,14 @@ func resolveServedMediaPath(root, storedPath string) (string, error) {
 
 func (h *Handler) livez(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, r, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (h *Handler) readyz(w http.ResponseWriter, r *http.Request) {
+	if h.readiness == nil || h.readiness.Ready(r.Context()) != nil {
+		writeProblem(w, r, http.StatusServiceUnavailable, "服务尚未就绪")
+		return
+	}
+	writeJSON(w, r, http.StatusOK, map[string]string{"status": "ready"})
 }
 
 func (h *Handler) root(w http.ResponseWriter, r *http.Request) {

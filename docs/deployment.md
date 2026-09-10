@@ -77,11 +77,12 @@ docker compose logs --tail 100 backend frontend
 默认入口：
 
 - 页面：`http://127.0.0.1:8088`
-- 后端健康检查：`http://127.0.0.1:8080/healthz`
+- 后端就绪检查：`http://127.0.0.1:8080/readyz`
 - 后端存活检查：`http://127.0.0.1:8080/livez`
+- 兼容健康端点：`http://127.0.0.1:8080/healthz`
 - 同源健康检查：`http://127.0.0.1:8088/healthz`
 
-`/livez` 仅用于确认后端进程与 HTTP 服务可响应，不代表 SQLite、媒体 Worker、队列或外部命令已经就绪。现有 `/healthz` 与 Compose 健康检查保持兼容，暂不切换。
+`/livez` 仅用于确认后端进程与 HTTP 服务可响应；`/readyz` 在启动迁移完成后注入检查器，并要求 SQLite 在 1 秒内响应。两者都不检查媒体 Worker、队列、转码或外部命令。`/healthz` 保留原存活语义，backend Compose healthcheck 已切换到 `/readyz`。
 
 停止容器与项目网络：
 
