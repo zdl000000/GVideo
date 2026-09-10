@@ -26,6 +26,12 @@ go run ./cmd/server
 
 采集系统如在容器或远端网络，应使用隔离管理网络和来源 ACL，而不是把端口发布到 `0.0.0.0`。排障完成后清空 `PPROF_ADDR` 并重启服务。
 
+## 告警与 Runbook
+
+供应商无关的初始阈值、查询语义、升级条件与恢复判定见 [observability-alerts.md](observability-alerts.md)，结构化日志字段见 [observability.md](observability.md)。这些文档是监控接入规格，不表示仓库已经部署告警产品。
+
+部署监控前必须启用受保护的 `METRICS_ADDR`，配置 `/metrics` 采集和 `/livez`、`/readyz` 外部探测，并按部署角色确认 `media_queue_depth` 是否应存在。当前没有备份成功时间戳指标或 Worker heartbeat；不得用文件时间、进程存活或 `/readyz` 冒充这些信号。
+
 ## 完整验收
 
 首次运行浏览器验收前安装 Chromium：
