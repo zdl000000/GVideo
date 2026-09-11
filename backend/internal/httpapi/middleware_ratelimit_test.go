@@ -12,6 +12,7 @@ import (
 
 	"gvideo/backend/internal/config"
 	"gvideo/backend/internal/modules/moderation"
+	"gvideo/backend/internal/modules/notifications"
 	"gvideo/backend/internal/platform"
 	"gvideo/backend/internal/repository"
 	"gvideo/backend/internal/service"
@@ -32,7 +33,7 @@ func newRateLimitTestHandler(t *testing.T, cfg config.Config) http.Handler {
 	if cfg.SessionTTL == 0 {
 		cfg.SessionTTL = time.Hour
 	}
-	return New(service.New(repository.New(db), cfg, logger), moderation.NewService(moderation.NewRepository(db)), cfg, logger).Routes()
+	return New(service.New(repository.New(db), cfg, logger), moderation.NewService(moderation.NewRepository(db)), notifications.NewService(notifications.NewRepository(db)), cfg, logger).Routes()
 }
 
 func TestTokenBucketLimiterAllowsBurstThenRefills(t *testing.T) {

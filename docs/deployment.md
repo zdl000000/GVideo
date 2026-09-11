@@ -30,7 +30,7 @@
 | `RATE_LIMIT_AUTH_PER_MINUTE` | `20` | 登录/注册按客户端地址的每分钟上限；`0` 表示禁用该档 |
 | `RATE_LIMIT_COMMENT_PER_MINUTE` | `30` | 发表评论按用户的每分钟上限；`0` 表示禁用该档 |
 | `RATE_LIMIT_UPLOAD_PER_MINUTE` | `10` | 视频与字幕上传按用户的每分钟上限；`0` 表示禁用该档 |
-| `USER_STORAGE_QUOTA_BYTES` | `0`（二进制默认，禁用）；Compose 部署默认 20 GiB | 每个用户的存储配额，按「源视频 + 封面 + HLS 转码实际产出」字节累计，超出后上传返回 413；HLS 字节在转码完成时入账，因此转码队列中的上传可能短暂超出配额 |
+| `USER_STORAGE_QUOTA_BYTES` | `0`（二进制默认，禁用）；Compose 部署默认 20 GiB | 每个用户的存储配额，按「源视频 + 封面 + HLS 转码实际产出」字节累计，超出后上传返回 413；HLS 字节在转码完成时入账，因此转码队列中的上传可能短暂超出配额。存量用户超出默认配额时：调高该值、设 `0` 禁用，或由用户删除旧投稿（413 提示已包含该指引） |
 | `GVIDEO_DATA_VOLUME` | `gvideo_gvideo-data` | SQLite 命名卷 |
 | `GVIDEO_MEDIA_VOLUME` | `gvideo_gvideo-media` | 媒体命名卷 |
 | `GVIDEO_HOST` | `video.example.com` | HTTPS 公网主机名 |

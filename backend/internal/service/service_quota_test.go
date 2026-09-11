@@ -132,3 +132,94 @@ func TestUploadWithoutQuotaIsUnlimited(t *testing.T) {
 		}
 	}
 }
+
+// A quota exactly equal to used+incoming is allowed; only exceeding it fails.
+func TestUploadQuotaExactBoundary(t *testing.T) {
+	dir := t.TempDir()
+	db, err := platform.OpenDatabase(filepath.Join(dir, "quota-boundary.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	repo := repository.New(db)
+	svc := New(repo, config.Config{
+		SessionTTL:            time.Hour,
+		MediaDir:              filepath.Join(dir, "media"),
+		MaxUploadBytes:        1 << 20,
+		UserStorageQuotaBytes: int64(len(minimalMP4)),
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	ctx := context.Background()
+
+	user, err := svc.Register(ctx, "quota_edge", "password123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.UploadVideo(ctx, UploadInput{
+		UserID: user.User.ID, Title: "边界视频", Category: Categories[0], Visibility: "public",
+		Video: multipartFileHeader(t, "video", "sample.mp4", "video/mp4", minimalMP4),
+	}); err != nil {
+		t.Fatalf("upload exactly at quota: %v", err)
+	}
+	// Pin the accounting: the successful upload consumed exactly its own bytes
+	// (no cover/HLS drift before the transcoding worker runs).
+	used, err := repo.UserStorageUsed(ctx, user.User.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if used != int64(len(minimalMP4)) {
+		t.Fatalf("used = %d, want exactly %d", used, len(minimalMP4))
+	}
+	if _, err := svc.UploadVideo(ctx, UploadInput{
+		UserID: user.User.ID, Title: "超出一字节", Category: Categories[0], Visibility: "public",
+		Video: multipartFileHeader(t, "video", "sample.mp4", "video/mp4", minimalMP4),
+	}); !errors.Is(err, domain.ErrQuotaExceeded) {
+		t.Fatalf("over-quota error = %v, want ErrQuotaExceeded", err)
+	}
+}
+
+// Deleting a video releases its bytes back to the user's quota.
+func TestDeleteVideoReleasesQuota(t *testing.T) {
+	dir := t.TempDir()
+	db, err := platform.OpenDatabase(filepath.Join(dir, "quota-delete.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	videoBytes := int64(len(minimalMP4))
+	svc := New(repository.New(db), config.Config{
+		SessionTTL:            time.Hour,
+		MediaDir:              filepath.Join(dir, "media"),
+		MaxUploadBytes:        1 << 20,
+		UserStorageQuotaBytes: videoBytes + 10,
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	ctx := context.Background()
+
+	user, err := svc.Register(ctx, "quota_delete", "password123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := svc.UploadVideo(ctx, UploadInput{
+		UserID: user.User.ID, Title: "待删除视频", Category: Categories[0], Visibility: "public",
+		Video: multipartFileHeader(t, "video", "sample.mp4", "video/mp4", minimalMP4),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Prove the quota is actually full before deleting: otherwise a broken
+	// quota check would make the later success meaningless.
+	if _, err := svc.UploadVideo(ctx, UploadInput{
+		UserID: user.User.ID, Title: "删除前超配额", Category: Categories[0], Visibility: "public",
+		Video: multipartFileHeader(t, "video", "sample.mp4", "video/mp4", minimalMP4),
+	}); !errors.Is(err, domain.ErrQuotaExceeded) {
+		t.Fatalf("pre-delete upload error = %v, want ErrQuotaExceeded", err)
+	}
+	if err := svc.DeleteVideo(ctx, user.User.ID, first.ID); err != nil {
+		t.Fatalf("delete video: %v", err)
+	}
+	if _, err := svc.UploadVideo(ctx, UploadInput{
+		UserID: user.User.ID, Title: "释放后再上传", Category: Categories[0], Visibility: "public",
+		Video: multipartFileHeader(t, "video", "sample.mp4", "video/mp4", minimalMP4),
+	}); err != nil {
+		t.Fatalf("upload after delete: %v", err)
+	}
+}

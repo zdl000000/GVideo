@@ -1,10 +1,25 @@
-package service
+package notifications
 
 import (
 	"context"
 
 	"gvideo/backend/internal/domain"
 )
+
+type notificationRepository interface {
+	ListNotifications(context.Context, int64, int, int) (domain.NotificationPage, error)
+	MarkNotificationRead(context.Context, int64, int64) error
+	MarkAllNotificationsRead(context.Context, int64) error
+}
+
+// Service owns notification ownership checks and read-side rules.
+type Service struct {
+	repo notificationRepository
+}
+
+func NewService(repo notificationRepository) *Service {
+	return &Service{repo: repo}
+}
 
 func (s *Service) Notifications(ctx context.Context, userID int64, page, pageSize int) (domain.NotificationPage, error) {
 	if userID <= 0 {

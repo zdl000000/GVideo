@@ -20,6 +20,7 @@ import (
 	"gvideo/backend/internal/config"
 	"gvideo/backend/internal/domain"
 	"gvideo/backend/internal/modules/moderation"
+	"gvideo/backend/internal/modules/notifications"
 	"gvideo/backend/internal/platform/metrics"
 	"gvideo/backend/internal/service"
 )
@@ -35,13 +36,14 @@ type ReadinessChecker interface {
 }
 
 type Handler struct {
-	service    *service.Service
-	moderation *moderation.Handler
-	readiness  ReadinessChecker
-	cfg        config.Config
-	logger     *slog.Logger
-	metrics    *metrics.Registry
-	limiters   map[string]*tokenBucketLimiter
+	service       *service.Service
+	moderation    *moderation.Handler
+	notifications *notifications.Handler
+	readiness     ReadinessChecker
+	cfg           config.Config
+	logger        *slog.Logger
+	metrics       *metrics.Registry
+	limiters      map[string]*tokenBucketLimiter
 }
 
 type response struct {
@@ -50,7 +52,7 @@ type response struct {
 	RequestID string `json:"request_id"`
 }
 
-func New(service *service.Service, moderationService *moderation.Service, cfg config.Config, logger *slog.Logger, registries ...*metrics.Registry) *Handler {
+func New(service *service.Service, moderationService *moderation.Service, notificationsService *notifications.Service, cfg config.Config, logger *slog.Logger, registries ...*metrics.Registry) *Handler {
 	var registry *metrics.Registry
 	if len(registries) > 0 {
 		registry = registries[0]
@@ -65,6 +67,7 @@ func New(service *service.Service, moderationService *moderation.Service, cfg co
 		"upload":  newTokenBucketLimiter(cfg.RateLimitUploadPerMinute),
 	}
 	h.moderation = moderation.NewHandler(moderationService, moderationHTTPPort{handler: h})
+	h.notifications = notifications.NewHandler(notificationsService, notificationsHTTPPort{handler: h})
 	return h
 }
 
@@ -102,9 +105,9 @@ func (h *Handler) Routes() http.Handler {
 		api.With(h.requireAuth, h.requireCSRF).Patch("/me/profile", h.updateProfile)
 		api.With(h.requireAuth, h.requireCSRF).Post("/me/password", h.changePassword)
 		api.With(h.requireAuth).Get("/me/creator/stats", h.creatorStats)
-		api.With(h.requireAuth).Get("/me/notifications", h.notifications)
-		api.With(h.requireAuth, h.requireCSRF).Patch("/me/notifications/{notificationID}/read", h.markNotificationRead)
-		api.With(h.requireAuth, h.requireCSRF).Post("/me/notifications/read-all", h.markAllNotificationsRead)
+		api.With(h.requireAuth).Get("/me/notifications", h.notifications.List)
+		api.With(h.requireAuth, h.requireCSRF).Patch("/me/notifications/{notificationID}/read", h.notifications.MarkRead)
+		api.With(h.requireAuth, h.requireCSRF).Post("/me/notifications/read-all", h.notifications.MarkAllRead)
 		api.With(h.requireAuth).Get("/admin/reports", h.moderation.AdminReports)
 		api.With(h.requireAuth, h.requireCSRF).Patch("/admin/reports/{reportID}", h.moderation.ReviewReport)
 
@@ -367,5 +370,34 @@ func (p moderationHTTPPort) VideoID(w http.ResponseWriter, r *http.Request) (int
 	return pathID(w, r)
 }
 func (p moderationHTTPPort) Pagination(r *http.Request, defaultSize int) (int, int) {
+	return pagination(r, defaultSize)
+}
+
+// notificationsHTTPPort adapts application HTTP concerns without exposing the
+// httpapi package to the notifications module.
+type notificationsHTTPPort struct{ handler *Handler }
+
+func (p notificationsHTTPPort) Principal(ctx context.Context) notifications.Principal {
+	session := sessionFrom(ctx)
+	return notifications.Principal{UserID: session.User.ID}
+}
+func (p notificationsHTTPPort) DecodeJSON(w http.ResponseWriter, r *http.Request, target any) bool {
+	return decodeJSON(w, r, target)
+}
+func (p notificationsHTTPPort) WriteJSON(w http.ResponseWriter, r *http.Request, status int, data any) {
+	writeJSON(w, r, status, data)
+}
+func (p notificationsHTTPPort) WriteError(w http.ResponseWriter, r *http.Request, err error) {
+	p.handler.writeError(w, r, err)
+}
+func (p notificationsHTTPPort) NotificationID(w http.ResponseWriter, r *http.Request) (int64, bool) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "notificationID"), 10, 64)
+	if err != nil || id <= 0 {
+		writeProblem(w, r, http.StatusBadRequest, "通知编号无效")
+		return 0, false
+	}
+	return id, true
+}
+func (p notificationsHTTPPort) Pagination(r *http.Request, defaultSize int) (int, int) {
 	return pagination(r, defaultSize)
 }

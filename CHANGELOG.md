@@ -23,6 +23,7 @@ GVideo 的重要变更记录在此。项目在首次正式发布后遵循语义�
 ### 架构
 
 - 开始渐进式 Feature-first 迁移，应用组合、共享 API 客户端和字幕管理已建立独立边界。
+- 通知中心迁移为 `internal/modules/notifications` 纵向模块（moderation 模板：repository/service/handler + HTTPPort 协议端口与三层测试），读侧归属核心仓库保留跨切写路径，架构守卫测试扩展至禁止模块反向依赖 core。
 
 ### 安全
 
