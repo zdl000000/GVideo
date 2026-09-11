@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	httppprof "net/http/pprof"
+	"net/netip"
 	"os"
 	"os/signal"
 	"strings"
@@ -94,6 +95,9 @@ func main() {
 		logger.Error("start admin endpoints", "error", err)
 		os.Exit(1)
 	}
+	for _, warning := range diagnosticsBindingWarnings(cfg.AppEnv, cfg.MetricsAddr, cfg.PprofAddr) {
+		logger.Warn(warning, "event", "diagnostics_binding_exposed")
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -130,6 +134,41 @@ type adminEndpoint struct {
 	path     string
 	server   *http.Server
 	listener net.Listener
+}
+
+// diagnosticsBindingWarnings reports diagnostics endpoints that are reachable
+// beyond the loopback interface outside production. Production rejects such
+// bindings during configuration loading; lower environments keep the operator
+// in control but should not expose pprof/metrics silently.
+func diagnosticsBindingWarnings(appEnv, metricsAddr, pprofAddr string) []string {
+	if appEnv == "production" {
+		return nil
+	}
+	var warnings []string
+	for _, endpoint := range []struct{ name, addr string }{
+		{name: "METRICS_ADDR", addr: metricsAddr},
+		{name: "PPROF_ADDR", addr: pprofAddr},
+	} {
+		if endpoint.addr == "" {
+			continue
+		}
+		host, _, err := net.SplitHostPort(endpoint.addr)
+		if err != nil {
+			continue
+		}
+		host = strings.TrimSpace(host)
+		if host == "" {
+			warnings = append(warnings, endpoint.name+" binds every interface; prefer 127.0.0.1 outside production")
+			continue
+		}
+		if strings.EqualFold(host, "localhost") {
+			continue
+		}
+		if ip, err := netip.ParseAddr(host); err != nil || !ip.Unmap().IsLoopback() {
+			warnings = append(warnings, endpoint.name+" binds a non-loopback address; prefer 127.0.0.1 outside production")
+		}
+	}
+	return warnings
 }
 
 func startAdminServers(logger *slog.Logger, metricsAddr, pprofAddr string, registry *metrics.Registry) ([]*http.Server, error) {

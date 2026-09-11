@@ -189,6 +189,27 @@ func TestDataGrantAdminCommand(t *testing.T) {
 	}
 }
 
+func TestDiagnosticsBindingWarnings(t *testing.T) {
+	if warnings := diagnosticsBindingWarnings("production", "0.0.0.0:9090", ":6060"); len(warnings) != 0 {
+		t.Fatalf("production should not produce warnings: %v", warnings)
+	}
+	if warnings := diagnosticsBindingWarnings("development", "127.0.0.1:9090", "localhost:6060"); len(warnings) != 0 {
+		t.Fatalf("loopback bindings should not warn: %v", warnings)
+	}
+	if warnings := diagnosticsBindingWarnings("development", "[::1]:9090", ""); len(warnings) != 0 {
+		t.Fatalf("IPv6 loopback should not warn: %v", warnings)
+	}
+	if warnings := diagnosticsBindingWarnings("development", "0.0.0.0:9090", "[::]:6060"); len(warnings) != 2 {
+		t.Fatalf("wildcard bindings warnings = %v, want 2", warnings)
+	}
+	if warnings := diagnosticsBindingWarnings("development", "10.1.2.3:9090", ""); len(warnings) != 1 {
+		t.Fatalf("private address warnings = %v, want 1", warnings)
+	}
+	if warnings := diagnosticsBindingWarnings("development", "", ""); len(warnings) != 0 {
+		t.Fatalf("disabled diagnostics should not warn: %v", warnings)
+	}
+}
+
 func testLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }

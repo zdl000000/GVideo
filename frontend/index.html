@@ -6,14 +6,7 @@
     <meta name="theme-color" content="#f6f7f9" />
     <meta name="description" content="GVideo 视频创作社区" />
     <title>GVideo</title>
-    <script>
-      (() => {
-        const saved = localStorage.getItem("gvideo-theme");
-        const theme = saved === "light" || saved === "dark" ? saved : "light";
-        document.documentElement.dataset.theme = theme;
-        document.documentElement.style.colorScheme = theme;
-      })();
-    </script>
+    <script src="/theme-init.js"></script>
   </head>
   <body>
     <div id="root"></div>
