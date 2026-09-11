@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -163,6 +165,9 @@ func (w *Worker) processOne(ctx context.Context) (bool, error) {
 		return true, err
 	}
 	output := domain.MediaOutput{Metadata: metadata, HLSMasterPath: hlsMasterPath}
+	if hlsMasterPath != "" {
+		output.HLSBytes = hlsDirectorySize(w.mediaDir, job.VideoID, w.logger)
+	}
 	if err := w.repo.CompleteTranscodingJob(ctx, job.ID, job.VideoID, output); err != nil {
 		if w.stats != nil {
 			w.stats.MediaJobFailed("complete")
@@ -198,6 +203,37 @@ func mediaErrorClass(stage string, err error) string {
 		return stage + "_timeout"
 	}
 	return stage + "_failed"
+}
+
+// hlsDirectorySize sums the bytes written for a completed HLS rendition set so
+// storage quotas can account for the transcoded output. Measurement failures
+// are logged and reported as zero: accounting must never block completion.
+func hlsDirectorySize(mediaDir string, videoID int64, logger *slog.Logger) int64 {
+	dir := filepath.Join(mediaDir, "hls", strconv.FormatInt(videoID, 10))
+	var total int64
+	err := filepath.WalkDir(dir, func(_ string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		total += info.Size()
+		return nil
+	})
+	if err != nil {
+		// A missing directory is normal (HLS disabled or nothing written);
+		// only unexpected failures deserve a warning.
+		if !errors.Is(err, fs.ErrNotExist) {
+			logger.Warn("measure hls output", "video_id", videoID, "error", err)
+		}
+		return 0
+	}
+	return total
 }
 
 func resolveMediaPath(mediaDir, storedPath string) (string, error) {

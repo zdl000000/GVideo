@@ -154,3 +154,34 @@ func TestLoadRejectsInvalidRateLimits(t *testing.T) {
 		t.Fatal("expected a negative upload rate limit to fail")
 	}
 }
+
+func TestLoadUserStorageQuota(t *testing.T) {
+	t.Setenv("APP_ENV", "development")
+	t.Setenv("USER_STORAGE_QUOTA_BYTES", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.UserStorageQuotaBytes != 0 {
+		t.Fatalf("default quota = %d, want 0 (unlimited)", cfg.UserStorageQuotaBytes)
+	}
+
+	t.Setenv("USER_STORAGE_QUOTA_BYTES", "21474836480")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.UserStorageQuotaBytes != 21474836480 {
+		t.Fatalf("quota = %d, want 21474836480", cfg.UserStorageQuotaBytes)
+	}
+
+	t.Setenv("USER_STORAGE_QUOTA_BYTES", "-1")
+	if _, err := Load(); err == nil {
+		t.Fatal("expected a negative quota to fail")
+	}
+	t.Setenv("USER_STORAGE_QUOTA_BYTES", "many")
+	if _, err := Load(); err == nil {
+		t.Fatal("expected a non-numeric quota to fail")
+	}
+}

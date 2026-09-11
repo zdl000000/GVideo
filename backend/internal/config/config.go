@@ -35,6 +35,7 @@ type Config struct {
 	RateLimitAuthPerMinute    int
 	RateLimitCommentPerMinute int
 	RateLimitUploadPerMinute  int
+	UserStorageQuotaBytes     int64
 }
 
 func Load() (Config, error) {
@@ -97,6 +98,10 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	storageQuotaBytes, err := strconv.ParseInt(env("USER_STORAGE_QUOTA_BYTES", "0"), 10, 64)
+	if err != nil || storageQuotaBytes < 0 {
+		return Config{}, fmt.Errorf("USER_STORAGE_QUOTA_BYTES must be a non-negative integer")
+	}
 	if appEnv == "production" {
 		if err := validateProductionDiagnosticsAddress("METRICS_ADDR", metricsAddr); err != nil {
 			return Config{}, err
@@ -138,6 +143,7 @@ func Load() (Config, error) {
 		RateLimitAuthPerMinute:    rateLimitAuth,
 		RateLimitCommentPerMinute: rateLimitComment,
 		RateLimitUploadPerMinute:  rateLimitUpload,
+		UserStorageQuotaBytes:     storageQuotaBytes,
 	}, nil
 }
 

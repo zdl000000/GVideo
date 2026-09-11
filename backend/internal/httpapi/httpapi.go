@@ -236,6 +236,8 @@ func (h *Handler) writeError(w http.ResponseWriter, r *http.Request, err error) 
 		writeProblem(w, r, http.StatusNotFound, "内容不存在")
 	case errors.Is(err, domain.ErrRateLimited):
 		writeProblem(w, r, http.StatusTooManyRequests, "请求过于频繁，请稍后再试")
+	case errors.Is(err, domain.ErrQuotaExceeded):
+		writeProblem(w, r, http.StatusRequestEntityTooLarge, "存储空间已用完，请先删除部分投稿")
 	default:
 		h.logger.Error("request failed",
 			"event", "http_handler_error",

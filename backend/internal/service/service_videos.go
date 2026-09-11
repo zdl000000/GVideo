@@ -58,6 +58,23 @@ func (s *Service) Video(ctx context.Context, id, viewerID int64, countView bool)
 	return publicVideo(video), nil
 }
 
+// enforceStorageQuota rejects uploads that would push a user's stored source
+// bytes past the configured quota; zero disables the check. Accounting is best
+// effort: concurrent uploads can momentarily overshoot.
+func (s *Service) enforceStorageQuota(ctx context.Context, userID, incomingBytes int64) error {
+	if s.cfg.UserStorageQuotaBytes <= 0 {
+		return nil
+	}
+	used, err := s.repo.UserStorageUsed(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if used+incomingBytes > s.cfg.UserStorageQuotaBytes {
+		return domain.ErrQuotaExceeded
+	}
+	return nil
+}
+
 func (s *Service) UploadVideo(ctx context.Context, input UploadInput) (domain.Video, error) {
 	input.Title = strings.TrimSpace(input.Title)
 	input.Description = strings.TrimSpace(input.Description)
@@ -67,6 +84,9 @@ func (s *Service) UploadVideo(ctx context.Context, input UploadInput) (domain.Vi
 	}
 	if input.Video.Size <= 0 || input.Video.Size > s.cfg.MaxUploadBytes {
 		return domain.Video{}, domain.ErrInvalidInput
+	}
+	if err := s.enforceStorageQuota(ctx, input.UserID, input.Video.Size); err != nil {
+		return domain.Video{}, err
 	}
 	subtitle, err := inspectAndConvertSubtitle(input.Subtitle, input.SubtitleLanguage, input.SubtitleLabel)
 	if err != nil {
@@ -114,6 +134,7 @@ func (s *Service) UploadVideo(ctx context.Context, input UploadInput) (domain.Vi
 	}
 
 	coverName := ""
+	coverBytes := int64(0)
 	if input.Cover != nil && input.Cover.Size > 0 {
 		coverExt, err := inspectImage(input.Cover)
 		if err != nil {
@@ -123,15 +144,19 @@ func (s *Service) UploadVideo(ctx context.Context, input UploadInput) (domain.Vi
 		if err := saveMultipart(input.Cover, filepath.Join(coverDir, coverName)); err != nil {
 			return domain.Video{}, err
 		}
+		coverBytes = input.Cover.Size
 	} else if generateCover(ctx, s.cfg.FFmpegPath, videoPath, filepath.Join(coverDir, id+".jpg")) == nil {
 		coverName = id + ".jpg"
+		if info, err := os.Stat(filepath.Join(coverDir, coverName)); err == nil {
+			coverBytes = info.Size()
+		}
 	}
 
 	newVideo := domain.NewVideo{
 		UserID: input.UserID, Title: input.Title, Description: input.Description, Category: input.Category,
 		Visibility: input.Visibility,
 		VideoPath:  filepath.Join("videos", videoName), CoverPath: relativeCover(coverName), MimeType: mimeType,
-		SizeBytes: input.Video.Size,
+		SizeBytes: input.Video.Size, CoverBytes: coverBytes,
 	}
 	var video domain.Video
 	if subtitle.path == "" {
@@ -168,6 +193,7 @@ func (s *Service) UpdateVideo(ctx context.Context, input UpdateVideoInput) (doma
 
 	var newCoverPath *string
 	var savedCoverPath string
+	coverBytes := int64(0)
 	if input.Cover != nil && input.Cover.Size > 0 {
 		ext, err := inspectImage(input.Cover)
 		if err != nil {
@@ -186,10 +212,12 @@ func (s *Service) UpdateVideo(ctx context.Context, input UpdateVideoInput) (doma
 			return domain.Video{}, err
 		}
 		newCoverPath = &relative
+		coverBytes = input.Cover.Size
 	}
 
 	updated, err := s.repo.UpdateVideo(ctx, input.VideoID, input.UserID, domain.UpdateVideo{
 		Title: input.Title, Description: input.Description, Category: input.Category, Visibility: input.Visibility, CoverPath: newCoverPath,
+		CoverBytes: coverBytes,
 	})
 	if err != nil {
 		if savedCoverPath != "" {
