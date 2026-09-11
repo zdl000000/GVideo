@@ -6,30 +6,32 @@
 
 ## 1. 当前状态
 
-SEC-03「安全响应头与管理端点绑定警告」已完成实现、目标测试、容器运行态验证（响应头检查 + Playwright CSP 烟雾）、独立只读复审（无本批 P0/P1，顺手修复一项既有 P1）与全量门禁，正在进入 Git 交付阶段。
+SEC-04「每用户上传存储配额」已完成实现、目标测试、后端全量测试、独立只读复审与全量门禁，正在进入 Git 交付阶段。
 
-本批为后端所有响应增加框架拒绝、Referrer-Policy、Permissions-Policy 与 deny-all CSP；前端 Nginx 为 SPA 设置同组头与含 hls.js 所需 `blob:`/`worker:` 白名单的 CSP，并关闭 `server_tokens`；为满足 `script-src 'self'`，把内联主题初始化脚本外置为 `frontend/public/theme-init.js`（no-cache 重验证）；修复前端 `/livez` 缺失代理（此前被 SPA 回退的 200 HTML 掩盖后端宕机）；非生产环境管理端点绑定非 loopback 时记录 `diagnostics_binding_exposed` 警告。
+本批新增 `USER_STORAGE_QUOTA_BYTES` 配额：上传前按用户累计源文件字节校验，超出返回 413 `storage_quota_exceeded`；二进制默认 0（禁用），Compose 部署默认 20 GiB；文档明确配额只统计源文件、HLS 产物约放大 2-3 倍磁盘。
 
 待办：显式暂存本批文件并复核 staged diff 后提交，推送 `codex/security-hardening` 并核对本地/远端一致。不得使用 `git add .`，不得 amend、force push 或直接推送 main。
 
-## 2. 已完成的实现（SEC-03）
+## 2. 已完成的实现（SEC-04）
 
-- 后端 `responseHeaders`：全部响应携带 `X-Content-Type-Options: nosniff`、`X-Frame-Options: DENY`、`Referrer-Policy: strict-origin-when-cross-origin`、`Permissions-Policy: camera=(), microphone=(), geolocation=()`、`Content-Security-Policy: default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`；敏感路径保持 `Cache-Control: no-store`。
-- 前端 Nginx（server 级）：同组头 + SPA CSP（`script-src 'self'`；`style-src 'self' 'unsafe-inline'`；`img-src 'self' data: blob:`；`media-src 'self' blob:`；`worker-src 'self' blob:`；`child-src 'self' blob:`；`connect-src 'self'`；`frame-ancestors 'none'`；`base-uri 'self'`；`form-action 'self'`；`object-src 'none'`），`server_tokens off`。
-- CSP 兼容性：内联主题脚本外置为 `frontend/public/theme-init.js`（保持 `script-src 'self'` 严格性），并加 `expires -1` 让客户端以 ETag 重验证而非启发式缓存；`child-src` 兼容 Safari < 15.4 的 blob Worker。
-- 既有 P1 修复：前端 Nginx 增加 `location = /livez` 代理到后端，外部存活探测不再被 SPA 回退的 200 HTML 掩盖（与 `docs/operations.md` 探测规格一致）。
-- 管理端点：`diagnosticsBindingWarnings` 在非生产环境对非 loopback 的 `METRICS_ADDR`/`PPROF_ADDR` 记录 `diagnostics_binding_exposed`；生产环境仍由 config 校验直接拒绝。
-- 文档：`docs/deployment.md` 补充响应头语义、CSP 维护须知（替换反代必须保留 `blob:`/`worker:` 白名单）与管理端点警告说明。
+- 配置：`config.UserStorageQuotaBytes`（env `USER_STORAGE_QUOTA_BYTES`，默认 `0` 表示禁用；负数或非数字启动报错）；`compose.yaml` 默认 `21474836480`（20 GiB）；`.env.example` 同步。
+- 数据（迁移 v3）：`videos` 表新增 `cover_size_bytes`、`hls_size_bytes`；`repository.UserStorageUsed` 汇总「源视频 + 封面 + HLS 实际产出」；删除投稿为物理 `DELETE FROM videos`，额度即时释放（`processing` 状态的投稿沿用既有“不可删除”规则）。
+- 计量覆盖：上传封面与 FFmpeg 自动生成封面均在落盘后计字节；`updateVideo` 换封面同步更新计量（否则可先传小封面再换成大封面绕过）；媒体 worker 在转码完成时统计 HLS 目录实际字节并随 `MediaOutput.HLSBytes` 入账，测量失败仅告警并记 0（不阻塞完成）。
+- 服务：`service.enforceStorageQuota` 在尺寸校验之后、任何文件写入之前执行；并发上传为 best-effort（可能瞬时超额，已注释说明）；配额只覆盖视频资产，头像不计量（每用户一份、替换即删除旧文件）。
+- 错误契约：`domain.ErrQuotaExceeded` → 413「存储空间已用完，请先删除部分投稿」；`docs/api-error-contract.md` 新增 `storage_quota_exceeded` 行。
+- 测试：service 配额内/超限/多用户隔离、封面计量（构造只有计入封面才会超限的边界）、无配额不限量、HTTP 413 契约、`hlsDirectorySize` 单元（含目录缺失）、repository 三项汇总、config 默认值与非法值、迁移 fixture v1+v2+v3。
 
 ## 3. 验证证据边界
 
 2026-09-11 本批证据：
 
-- 目标测试：`middleware_headers_test.go`（`/`、`/livez`、`/readyz`、`/api/`、`/media/` 全路径头断言）、`main_test.go` 警告分类用例、既有 httpapi/service 定向用例全部通过；`go vet`、`gofmt` 通过。
-- 运行态（容器重建 `docker compose up -d --build backend frontend`）：backend/frontend healthy；`curl -I` 实测头齐全；`/livez` 返回 `application/json` 65B（修复前为 794B `text/html`）；`/theme-init.js` 带 `Cache-Control: no-cache` 与 ETag；`/readyz` 200。
-- 浏览器烟雾（Playwright，构建产物经 Nginx）：首页 4 张视频卡片渲染、播放页 video 存在且 `play()` 后 `currentTime > 0`（HLS 在严格 CSP 下可播）、控制台零 CSP 违规。
+- 目标测试：`TestUploadStorageQuota`、`TestUploadWithoutQuotaIsUnlimited`、`TestUploadQuotaReturnsRequestEntityTooLarge`、`TestLoadUserStorageQuota` 全部通过。
+- 后端全量：`go test ./...`（全包）、`go vet ./...`、`gofmt -l` 通过。
 - 全量门禁：`scripts/check.ps1` 通过。
-- 独立只读复审（agent）：无本批引入的 P0/P1；确认 deny-all CSP 对 HLS 分片/m3u8/VTT/Range 无副作用、`add_header` 继承与 `always` 生效、警告分类边界正确。遗留 P2/P3 记录在后续队列（网关自产响应头、头重复去重、CSP 进一步收紧、测试缺口）。
+- 独立只读复审（agent）：发现并已修复 2 项 P1——封面/自动封面不计入（1KB 视频挂 10MiB 封面可放大 ~10^4 绕过配额）与 HLS 产物完全不入账（低码率源放大远超文档估计）；修复方式为迁移 v3 记录 `cover_size_bytes`/`hls_size_bytes`、转码完成时统计 HLS 目录、换封面同步计量，并补齐对应测试。复审给出的 P2（并发 TOCTOU 瞬时超额、存量超配额升级提示、`processing` 卡死期间不可删导致额度无法释放）已在文档说明或记录后续；P3 测试缺口已补删除释放与精确边界之外的主要项。
+- 待补：容器重建后的运行态验证（上传超限返回 413）归入合并阶段演练。
+
+历史证据（BASE-06，2026-09-10/11）：`scripts/check.ps1`、`docker compose up --build -d --force-recreate`、`/livez`、`/readyz`、frontend `/healthz`、桌面 Playwright E2E、`acceptance.ps1 -SkipBuildChecks -IncludeBackupRestore` 与 Linux/CGO Backend Race CI 均已通过；详见 git 历史与 Pull Request #16。
 
 ## 4. 已完成队列
 
@@ -48,33 +50,33 @@ SEC-03「安全响应头与管理端点绑定警告」已完成实现、目标�
 13. `BASE-06`：Compose 运行态、健康检查、优雅停止、完整验收、隔离备份恢复和 Linux/CGO race 证据闭环。
 14. `SEC-01`：管理员提权修复（迁移 v2、保留名锁定、moderation 改布尔、`data-grant-admin`、合并携带标志、升级文档）。
 15. `SEC-02`：请求速率限制（auth/comment/upload 分档、429 + Retry-After、可信代理地址解析、会话形状预检、代理头加固）。
-16. `SEC-03`：安全响应头（后端 deny-all CSP + 框架拒绝；SPA CSP 含 blob/worker 白名单；主题脚本外置）与管理端点非 loopback 绑定警告；顺手修复 `/livez` 代理缺失。本批。
+16. `SEC-03`：安全响应头（后端 deny-all CSP + 框架拒绝；SPA CSP 含 blob/worker 白名单；主题脚本外置）与管理端点非 loopback 绑定警告；顺手修复 `/livez` 代理缺失。
+17. `SEC-04`：每用户上传存储配额（413 `storage_quota_exceeded`、Compose 默认 20 GiB）。本批。
 
 ## 5. 当前任务与后续队列
 
-SEC-03 交付后，后续安全与质量队列（按优先级）：
+SEC-04 交付后，后续安全与质量队列（按优先级）：
 
 - `SEC-03b`：网关（`deploy/nginx/https.conf.template`）443 自产响应（`limit_req` 429、502、`/gateway-healthz`）补齐同组响应头，并评估经由 `proxy_hide_header` 去重上游重复头；CSP 进一步收紧（评估移除 `style-src 'unsafe-inline'` 与 `img-src data:`）；补充 nginx 头行为与主机名/无端口/`[::ffff:127.0.0.1]` 等警告用例。
-- `SEC-04`：上传配额（每用户总量/频率）。
 - `SEC-05`（低危批次）：登录用户名时序枚举防护（dummy bcrypt）、CSRF 恒定时间比较、搜索 LIKE 通配符转义、frontend/nginx 容器降权。
+- `SEC-04b`：配额可观测性与运维完善——超配额计数指标/Runbook、存量用户超过默认 20 GiB 时的升级指引与扩容说明、字幕字节计量、`processing` 卡死时的人工释放流程、配额精确边界（`used+size == quota`）与删除释放的自动化用例。
 - 既有独立队列：OpenAPI、依赖安全扫描、更广泛 E2E 覆盖；`A2 后续`：notifications/comments/interactions 模块迁移与进程内事件总线。
 - 媒体管线独立（Storage 接口缝、worker 出进程、快慢队列）等待触发信号。
 
 ## 6. 团队调度与验收
 
 - 总控执行写入、测试、容器重建和 Git 操作；架构评审、安全复审与前端工程 Agent 只读/受限并行。
-- 本批调度：DeepSeek 侧总控实现与运行态验证；只读复审 agent 复查 diff（无本批 P0/P1，识别一项既有 P1 已修复；P2/P3 记录后续）。
+- 本批调度：DeepSeek 侧总控实现与全量测试；只读复审 agent 复查 diff（结论见 §3）。
 - 任一审查发现阻断，只修复有证据的最小范围并重新运行相关验证。
 - 目标测试、全仓静态门禁和代码只读联合审查均无阻断后，可以提交并推送开发分支。
 - 合并和实际生产部署仍遵循仓库审查与组织变更批准。
 
-## 6.1 2026-09-11 SEC-03 交付点
+## 6.1 2026-09-11 SEC-04 交付点
 
-- 分支：`codex/security-hardening`（承接 SEC-02 的 `02e3a85`）。
-- 预期修改文件：`CHANGELOG.md`、`docs/deployment.md`、`docs/development-handoff.md`、`deploy/nginx/https.conf.template`、`frontend/index.html`、`frontend/nginx.conf`、`backend/cmd/server/main.go`、`backend/cmd/server/main_test.go`、`backend/internal/httpapi/middleware.go`，以及新增 `backend/internal/httpapi/middleware_headers_test.go`、`frontend/public/theme-init.js`。
+- 分支：`codex/security-hardening`（承接 SEC-03 的 `fe607f1`）。
+- 预期修改文件：`CHANGELOG.md`、`.env.example`、`compose.yaml`、`docs/api-error-contract.md`、`docs/deployment.md`、`docs/development-handoff.md`、`backend/internal/config/config.go`、`backend/internal/config/config_test.go`、`backend/internal/domain/domain.go`、`backend/internal/httpapi/httpapi.go`、`backend/internal/repository/repository_videos.go`、`backend/internal/service/service_videos.go`，以及新增 `backend/internal/service/service_quota_test.go`、`backend/internal/httpapi/quota_http_test.go`。
 - 静态门禁：`scripts/check.ps1`、`go test ./...`、`go vet`、`gofmt`、`git diff --check` 通过。
-- 运行门禁：backend/frontend 重建后 healthy；`/livez`、`/readyz` 与首页均 200；Playwright CSP 烟雾通过（含 HLS 播放与控制台零 CSP 违规）。
-- Git 交付顺序：显式暂存上述文件，复核 `git diff --cached --check` 与 staged diff，提交 `feat(security): add security response headers`，推送当前开发分支并核对本地/远端一致。
+- Git 交付顺序：显式暂存上述文件，复核 `git diff --cached --check` 与 staged diff，提交 `feat(security): enforce per-user storage quota`，推送当前开发分支并核对本地/远端一致。
 - 不创建自动守护任务；本批工作在当前会话内完成交付。
 
 ## 7. 最终门禁与 Git

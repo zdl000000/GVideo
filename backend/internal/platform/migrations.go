@@ -40,6 +40,17 @@ var databaseMigrations = []databaseMigration{
 			return err
 		},
 	},
+	{
+		version:  3,
+		identity: "videos-storage-accounting-v3",
+		apply: func(tx *sql.Tx) error {
+			if _, err := ensureColumn(tx, "videos", "cover_size_bytes", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+				return err
+			}
+			_, err := ensureColumn(tx, "videos", "hls_size_bytes", "INTEGER NOT NULL DEFAULT 0")
+			return err
+		},
+	},
 }
 
 func migrate(db *sql.DB) error {

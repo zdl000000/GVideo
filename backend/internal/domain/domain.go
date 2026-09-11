@@ -17,6 +17,7 @@ var (
 	ErrRetryUnavailable = errors.New("retry unavailable")
 	ErrReportExists     = errors.New("report already exists")
 	ErrRateLimited      = errors.New("rate limited")
+	ErrQuotaExceeded    = errors.New("storage quota exceeded")
 )
 
 type User struct {
@@ -125,6 +126,7 @@ type MediaMetadata struct {
 type MediaOutput struct {
 	Metadata      MediaMetadata
 	HLSMasterPath string
+	HLSBytes      int64
 }
 
 type TranscodingJob struct {
@@ -171,6 +173,7 @@ type UpdateVideo struct {
 	Category    string
 	Visibility  string
 	CoverPath   *string
+	CoverBytes  int64
 }
 
 type VideoAssets struct {
@@ -191,6 +194,7 @@ type NewVideo struct {
 	MimeType        string
 	DurationSeconds float64
 	SizeBytes       int64
+	CoverBytes      int64
 }
 
 type CreatorStats struct {

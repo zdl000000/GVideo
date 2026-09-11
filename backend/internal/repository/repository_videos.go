@@ -10,6 +10,16 @@ import (
 	"gvideo/backend/internal/domain"
 )
 
+// UserStorageUsed reports the total stored bytes for one user: source videos
+// plus covers plus the recorded HLS rendition output.
+func (r *Repository) UserStorageUsed(ctx context.Context, userID int64) (int64, error) {
+	var used int64
+	if err := r.db.QueryRowContext(ctx, `SELECT COALESCE(SUM(size_bytes + cover_size_bytes + hls_size_bytes), 0) FROM videos WHERE user_id = ?`, userID).Scan(&used); err != nil {
+		return 0, fmt.Errorf("sum user storage: %w", err)
+	}
+	return used, nil
+}
+
 func (r *Repository) CreateVideo(ctx context.Context, input domain.NewVideo) (domain.Video, error) {
 	return r.createVideo(ctx, input, nil)
 }
@@ -30,9 +40,9 @@ func (r *Repository) createVideo(ctx context.Context, input domain.NewVideo, sub
 	result, err := tx.ExecContext(ctx, `
 INSERT INTO videos(
   user_id, title, description, category, visibility, video_path, cover_path, mime_type,
-  duration_seconds, size_bytes, processing_status, processing_progress, processing_stage)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, 'queued')`, input.UserID, input.Title, input.Description, input.Category, input.Visibility,
-		input.VideoPath, input.CoverPath, input.MimeType, input.DurationSeconds, input.SizeBytes)
+  duration_seconds, size_bytes, cover_size_bytes, processing_status, processing_progress, processing_stage)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, 'queued')`, input.UserID, input.Title, input.Description, input.Category, input.Visibility,
+		input.VideoPath, input.CoverPath, input.MimeType, input.DurationSeconds, input.SizeBytes, input.CoverBytes)
 	if err != nil {
 		return domain.Video{}, fmt.Errorf("create video: %w", err)
 	}
@@ -108,8 +118,8 @@ UPDATE videos SET title = ?, description = ?, category = ?, visibility = ?
 WHERE id = ? AND user_id = ?`, input.Title, input.Description, input.Category, input.Visibility, videoID, userID)
 	} else {
 		result, err = r.db.ExecContext(ctx, `
-UPDATE videos SET title = ?, description = ?, category = ?, visibility = ?, cover_path = ?
-WHERE id = ? AND user_id = ?`, input.Title, input.Description, input.Category, input.Visibility, *input.CoverPath, videoID, userID)
+UPDATE videos SET title = ?, description = ?, category = ?, visibility = ?, cover_path = ?, cover_size_bytes = ?
+WHERE id = ? AND user_id = ?`, input.Title, input.Description, input.Category, input.Visibility, *input.CoverPath, input.CoverBytes, videoID, userID)
 	}
 	if err != nil {
 		return domain.Video{}, fmt.Errorf("update video: %w", err)

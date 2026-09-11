@@ -149,10 +149,10 @@ func (r *Repository) CompleteTranscodingJob(ctx context.Context, jobID, videoID 
 	defer tx.Rollback()
 	if _, err := tx.ExecContext(ctx, `
 UPDATE videos SET duration_seconds = ?, source_width = ?, source_height = ?, source_bitrate = ?,
-  video_codec = ?, audio_codec = ?, hls_master_path = ?, processing_status = 'ready',
+  video_codec = ?, audio_codec = ?, hls_master_path = ?, hls_size_bytes = ?, processing_status = 'ready',
   processing_progress = 100, processing_stage = 'ready', processing_error = '', processed_at = CURRENT_TIMESTAMP
 WHERE id = ?`, output.Metadata.DurationSeconds, output.Metadata.Width, output.Metadata.Height, output.Metadata.Bitrate,
-		output.Metadata.VideoCodec, output.Metadata.AudioCodec, output.HLSMasterPath, videoID); err != nil {
+		output.Metadata.VideoCodec, output.Metadata.AudioCodec, output.HLSMasterPath, output.HLSBytes, videoID); err != nil {
 		return fmt.Errorf("save media metadata: %w", err)
 	}
 	jobResult, err := tx.ExecContext(ctx, `
