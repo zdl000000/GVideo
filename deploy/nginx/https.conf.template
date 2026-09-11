@@ -11,6 +11,8 @@ map "$request_method:$uri" $gvideo_upload_limit_key {
 limit_req_zone $gvideo_auth_limit_key zone=gvideo_auth:10m rate=10r/m;
 limit_req_zone $gvideo_upload_limit_key zone=gvideo_upload:10m rate=2r/m;
 
+server_tokens off;
+
 # Docker's embedded DNS keeps the gateway attached to a recreated frontend
 # container without requiring the gateway itself to be restarted.
 resolver 127.0.0.11 valid=10s ipv6=off;

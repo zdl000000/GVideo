@@ -6,34 +6,30 @@
 
 ## 1. 当前状态
 
-SEC-02「请求速率限制」已完成实现、目标测试、独立只读复审（1 项 P1 已修复）与本轮全量门禁，正在进入 Git 交付阶段。
+SEC-03「安全响应头与管理端点绑定警告」已完成实现、目标测试、容器运行态验证（响应头检查 + Playwright CSP 烟雾）、独立只读复审（无本批 P0/P1，顺手修复一项既有 P1）与全量门禁，正在进入 Git 交付阶段。
 
-本批为后端新增零依赖 token bucket 限流：登录/注册按客户端地址、评论与上传按用户分档；超限返回 429 + `Retry-After`；新增 `domain.ErrRateLimited` 与错误契约 `rate_limited`；用自研 `clientAddress` 中间件替换弃用的 chi RealIP（仅信任 loopback/私网对端的 `X-Forwarded-For`/`X-Real-IP`，永不信任 `True-Client-IP`，XFF 取最右侧公网地址，IPv6 按 /64 归一）；网关与前端代理同步清理/覆写转发头。同批附带会话 token 形状预检，避免伪造 cookie 触发数据库查询。
+本批为后端所有响应增加框架拒绝、Referrer-Policy、Permissions-Policy 与 deny-all CSP；前端 Nginx 为 SPA 设置同组头与含 hls.js 所需 `blob:`/`worker:` 白名单的 CSP，并关闭 `server_tokens`；为满足 `script-src 'self'`，把内联主题初始化脚本外置为 `frontend/public/theme-init.js`（no-cache 重验证）；修复前端 `/livez` 缺失代理（此前被 SPA 回退的 200 HTML 掩盖后端宕机）；非生产环境管理端点绑定非 loopback 时记录 `diagnostics_binding_exposed` 警告。
 
 待办：显式暂存本批文件并复核 staged diff 后提交，推送 `codex/security-hardening` 并核对本地/远端一致。不得使用 `git add .`，不得 amend、force push 或直接推送 main。
 
-## 2. 已完成的实现（SEC-02）
+## 2. 已完成的实现（SEC-03）
 
-- 限流核心：`internal/httpapi/middleware_ratelimit.go`，零依赖 token bucket（rate=perMinute/60，burst=perMinute，桶硬上限 8192 + 随机淘汰，空闲 10 分钟按分钟清扫）。
-- 分档：`auth`（登录/注册，按客户端地址）、`comment`（发表评论，按用户）、`upload`（视频与字幕上传，按用户）；用户档挂在 requireAuth→requireCSRF 之后，CSRF 拒绝不消耗配额。
-- 配置：`RATE_LIMIT_AUTH_PER_MINUTE`（默认 20）、`RATE_LIMIT_COMMENT_PER_MINUTE`（30）、`RATE_LIMIT_UPLOAD_PER_MINUTE`（10）；`0` 表示禁用该档，负值/非数字启动报错；compose 与 `.env.example` 已透传。
-- 错误契约：`domain.ErrRateLimited` → 429「请求过于频繁，请稍后再试」，响应含 `Retry-After`（整数秒向上取整）与 `Connection: close`；`docs/api-error-contract.md` 新增 `rate_limited` 行。
-- 客户端地址解析：替换弃用的 `middleware.RealIP`；仅 loopback/私网对端可提供转发地址；XFF 从右向左取最后一个公网条目（抵御 Cloudflare 等"保留客户端前缀"的追加型代理），全私网链回退最右有效地址；IPv6 归一 /64 防止地址轮换绕过。
-- 代理加固：网关 `X-Forwarded-For` 由 `$proxy_add_x_forwarded_for` 改为覆写 `$remote_addr`；网关与前端 `/api/`、`/media/` 均清空 `True-Client-IP`。
-- 会话预检：`validSessionToken` 在数据库查询前校验 64 位小写十六进制形状，伪造 cookie 不再触发查库。
-- 文档：`docs/deployment.md`（限流语义、替换网关必须覆写 XFF、NAT 共享配额、429 与大文件上传说明）。
+- 后端 `responseHeaders`：全部响应携带 `X-Content-Type-Options: nosniff`、`X-Frame-Options: DENY`、`Referrer-Policy: strict-origin-when-cross-origin`、`Permissions-Policy: camera=(), microphone=(), geolocation=()`、`Content-Security-Policy: default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`；敏感路径保持 `Cache-Control: no-store`。
+- 前端 Nginx（server 级）：同组头 + SPA CSP（`script-src 'self'`；`style-src 'self' 'unsafe-inline'`；`img-src 'self' data: blob:`；`media-src 'self' blob:`；`worker-src 'self' blob:`；`child-src 'self' blob:`；`connect-src 'self'`；`frame-ancestors 'none'`；`base-uri 'self'`；`form-action 'self'`；`object-src 'none'`），`server_tokens off`。
+- CSP 兼容性：内联主题脚本外置为 `frontend/public/theme-init.js`（保持 `script-src 'self'` 严格性），并加 `expires -1` 让客户端以 ETag 重验证而非启发式缓存；`child-src` 兼容 Safari < 15.4 的 blob Worker。
+- 既有 P1 修复：前端 Nginx 增加 `location = /livez` 代理到后端，外部存活探测不再被 SPA 回退的 200 HTML 掩盖（与 `docs/operations.md` 探测规格一致）。
+- 管理端点：`diagnosticsBindingWarnings` 在非生产环境对非 loopback 的 `METRICS_ADDR`/`PPROF_ADDR` 记录 `diagnostics_binding_exposed`；生产环境仍由 config 校验直接拒绝。
+- 文档：`docs/deployment.md` 补充响应头语义、CSP 维护须知（替换反代必须保留 `blob:`/`worker:` 白名单）与管理端点警告说明。
 
 ## 3. 验证证据边界
 
 2026-09-11 本批证据：
 
-- 目标测试：`internal/httpapi` 限流相关 10 项 + `internal/service` 管理员/会话相关 7 项全部通过，覆盖 burst/补充、`Retry-After`、按地址与按用户隔离、`True-Client-IP` 永不信任、伪造前缀与全私网链、IPv6 /64 归一、硬上限淘汰、定时清扫、CSRF 拒绝不消耗配额、伪造会话 token 拒绝。
-- 全量后端：`go test ./...`（全包）、`go vet ./...`、`gofmt -l` 通过。
-- 全量门禁：`scripts/check.ps1`（Compose 配置、全仓 Go 测试与 vet、前端 14 文件 49 测试、typecheck、build、bundle 预算、`git diff --check`）通过。
-- 独立只读复审（agent）：确认自带链路（网关覆写 → 前端追加 → 后端取最右公网）正确；发现 1 项 P1（XFF 取最左段可被追加型上游代理伪造）已修复并补测试；P2/P3 中采纳了会话形状预检、`Connection: close`、`.env.example`、部署文档说明；其余（未认证洪泛的通用限流、LRU 淘汰、acceptance 显式 429 断言、并发 `-race`）记录为后续队列。
-- 待补运行时证据：Docker 重建与运行态限流演练（合并阶段执行）。
-
-历史证据（BASE-06，2026-09-10/11）：`scripts/check.ps1`、`docker compose up --build -d --force-recreate`、`/livez`、`/readyz`、frontend `/healthz`、桌面 Playwright E2E、`acceptance.ps1 -SkipBuildChecks -IncludeBackupRestore` 与 Linux/CGO Backend Race CI 均已通过；详见 git 历史与 Pull Request #16。
+- 目标测试：`middleware_headers_test.go`（`/`、`/livez`、`/readyz`、`/api/`、`/media/` 全路径头断言）、`main_test.go` 警告分类用例、既有 httpapi/service 定向用例全部通过；`go vet`、`gofmt` 通过。
+- 运行态（容器重建 `docker compose up -d --build backend frontend`）：backend/frontend healthy；`curl -I` 实测头齐全；`/livez` 返回 `application/json` 65B（修复前为 794B `text/html`）；`/theme-init.js` 带 `Cache-Control: no-cache` 与 ETag；`/readyz` 200。
+- 浏览器烟雾（Playwright，构建产物经 Nginx）：首页 4 张视频卡片渲染、播放页 video 存在且 `play()` 后 `currentTime > 0`（HLS 在严格 CSP 下可播）、控制台零 CSP 违规。
+- 全量门禁：`scripts/check.ps1` 通过。
+- 独立只读复审（agent）：无本批引入的 P0/P1；确认 deny-all CSP 对 HLS 分片/m3u8/VTT/Range 无副作用、`add_header` 继承与 `always` 生效、警告分类边界正确。遗留 P2/P3 记录在后续队列（网关自产响应头、头重复去重、CSP 进一步收紧、测试缺口）。
 
 ## 4. 已完成队列
 
@@ -50,34 +46,35 @@ SEC-02「请求速率限制」已完成实现、目标测试、独立只读复�
 11. `CI-01`：Ubuntu Backend Race Job workflow 已实现，并由 Pull Request #16 在 Linux/CGO 环境实际运行通过。
 12. `OPS-OBS-01A`～`01D`：存活/就绪端点、结构化日志及告警规格；最终审查修复已在 `8be7007` 完成、复审并推送。
 13. `BASE-06`：Compose 运行态、健康检查、优雅停止、完整验收、隔离备份恢复和 Linux/CGO race 证据闭环。
-14. `SEC-01`：管理员提权修复（迁移 v2、保留名锁定、moderation 改布尔、`data-grant-admin`、合并携带标志、升级文档）；独立安全复审无 P0，P2/P3 修复完成。
-15. `SEC-02`：请求速率限制（auth/comment/upload 分档、429 + Retry-After、可信代理地址解析、会话形状预检、代理头加固）；独立复审 1 项 P1 已修复。本批。
+14. `SEC-01`：管理员提权修复（迁移 v2、保留名锁定、moderation 改布尔、`data-grant-admin`、合并携带标志、升级文档）。
+15. `SEC-02`：请求速率限制（auth/comment/upload 分档、429 + Retry-After、可信代理地址解析、会话形状预检、代理头加固）。
+16. `SEC-03`：安全响应头（后端 deny-all CSP + 框架拒绝；SPA CSP 含 blob/worker 白名单；主题脚本外置）与管理端点非 loopback 绑定警告；顺手修复 `/livez` 代理缺失。本批。
 
 ## 5. 当前任务与后续队列
 
-SEC-02 交付后，后续安全与质量队列（按优先级）：
+SEC-03 交付后，后续安全与质量队列（按优先级）：
 
-- `SEC-02b`：未认证洪泛的通用限制（GET/retry/delete 与伪 cookie 请求已有形状预检缓解，可加宽松的全局 IP 档）；桶淘汰升级为 LRU；acceptance 脚本增加显式 429 断言；并发 `-race` 用例由 CI 覆盖。
-- `SEC-03`：管理端点（`METRICS_ADDR`/`PPROF_ADDR`）非生产环境绑定非 loopback 时的启动警告。
-- `SEC-04`：上传配额（每用户总量/频率）与安全响应头（CSP、X-Frame-Options、Referrer-Policy，nginx 侧对齐）。
+- `SEC-03b`：网关（`deploy/nginx/https.conf.template`）443 自产响应（`limit_req` 429、502、`/gateway-healthz`）补齐同组响应头，并评估经由 `proxy_hide_header` 去重上游重复头；CSP 进一步收紧（评估移除 `style-src 'unsafe-inline'` 与 `img-src data:`）；补充 nginx 头行为与主机名/无端口/`[::ffff:127.0.0.1]` 等警告用例。
+- `SEC-04`：上传配额（每用户总量/频率）。
 - `SEC-05`（低危批次）：登录用户名时序枚举防护（dummy bcrypt）、CSRF 恒定时间比较、搜索 LIKE 通配符转义、frontend/nginx 容器降权。
 - 既有独立队列：OpenAPI、依赖安全扫描、更广泛 E2E 覆盖；`A2 后续`：notifications/comments/interactions 模块迁移与进程内事件总线。
 - 媒体管线独立（Storage 接口缝、worker 出进程、快慢队列）等待触发信号。
 
 ## 6. 团队调度与验收
 
-- 总控执行写入、测试和 Git 操作；架构评审、安全复审与前端工程 Agent 只读/受限并行。
-- 本批调度：架构师评审（采纳 RealIP 弃用风险、True-Client-IP 伪造、IPv6 /64、硬上限、CSRF 顺序、上传默认值）；DeepSeek 侧总控实现；只读复审 agent 复查 diff（1 项 P1 + 若干 P2/P3，P1 与可快速修复项已处理）。
+- 总控执行写入、测试、容器重建和 Git 操作；架构评审、安全复审与前端工程 Agent 只读/受限并行。
+- 本批调度：DeepSeek 侧总控实现与运行态验证；只读复审 agent 复查 diff（无本批 P0/P1，识别一项既有 P1 已修复；P2/P3 记录后续）。
 - 任一审查发现阻断，只修复有证据的最小范围并重新运行相关验证。
 - 目标测试、全仓静态门禁和代码只读联合审查均无阻断后，可以提交并推送开发分支。
 - 合并和实际生产部署仍遵循仓库审查与组织变更批准。
 
-## 6.1 2026-09-11 SEC-02 交付点
+## 6.1 2026-09-11 SEC-03 交付点
 
-- 分支：`codex/security-hardening`（承接 SEC-01 的 `aba0e6f`）。
-- 预期修改文件：`CHANGELOG.md`、`.env.example`、`compose.yaml`、`docs/deployment.md`、`docs/api-error-contract.md`、`docs/development-handoff.md`、`deploy/nginx/https.conf.template`、`frontend/nginx.conf`、`backend/internal/domain/domain.go`、`backend/internal/config/config.go`、`backend/internal/config/config_test.go`、`backend/internal/httpapi/httpapi.go`、`backend/internal/service/service_auth.go`、`backend/internal/service/service_admin_guard_test.go`，以及新增 `backend/internal/httpapi/middleware_ratelimit.go`、`backend/internal/httpapi/middleware_ratelimit_test.go`。
+- 分支：`codex/security-hardening`（承接 SEC-02 的 `02e3a85`）。
+- 预期修改文件：`CHANGELOG.md`、`docs/deployment.md`、`docs/development-handoff.md`、`deploy/nginx/https.conf.template`、`frontend/index.html`、`frontend/nginx.conf`、`backend/cmd/server/main.go`、`backend/cmd/server/main_test.go`、`backend/internal/httpapi/middleware.go`，以及新增 `backend/internal/httpapi/middleware_headers_test.go`、`frontend/public/theme-init.js`。
 - 静态门禁：`scripts/check.ps1`、`go test ./...`、`go vet`、`gofmt`、`git diff --check` 通过。
-- Git 交付顺序：显式暂存上述文件，复核 `git diff --cached --check` 与 staged diff，提交 `feat(security): add request rate limiting`，推送当前开发分支并核对本地/远端一致。
+- 运行门禁：backend/frontend 重建后 healthy；`/livez`、`/readyz` 与首页均 200；Playwright CSP 烟雾通过（含 HLS 播放与控制台零 CSP 违规）。
+- Git 交付顺序：显式暂存上述文件，复核 `git diff --cached --check` 与 staged diff，提交 `feat(security): add security response headers`，推送当前开发分支并核对本地/远端一致。
 - 不创建自动守护任务；本批工作在当前会话内完成交付。
 
 ## 7. 最终门禁与 Git

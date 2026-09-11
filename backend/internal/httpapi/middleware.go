@@ -32,6 +32,13 @@ func (h *Handler) optionalSession(next http.Handler) http.Handler {
 func (h *Handler) responseHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		// Backend responses are JSON, media, or plain text — never documents;
+		// denying every resource type keeps accidentally rendered HTML inert
+		// and blocks framing of error pages.
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
 		if strings.HasPrefix(r.URL.Path, "/api/v1/auth/") ||
 			strings.HasPrefix(r.URL.Path, "/api/v1/me/") ||
 			strings.HasPrefix(r.URL.Path, "/api/v1/admin/") {
