@@ -1,9 +1,11 @@
 package httpapi
 
 import (
+	"fmt"
 	"go/parser"
 	"go/token"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -38,4 +40,56 @@ func forbiddenHTTPAPIImport(importPath string) bool {
 		return true
 	}
 	return strings.HasPrefix(importPath, "gvideo/backend/internal/repository/")
+}
+
+// Modules must depend on injected contracts only: pulling in the service,
+// repository or httpapi layers from a module would reintroduce the tech-layer
+// coupling this structure exists to remove.
+func TestModulesDoNotImportCoreLayers(t *testing.T) {
+	root := filepath.Join("..", "modules")
+	fileSet := token.NewFileSet()
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if !entry.IsDir() {
+			return nil
+		}
+		packages, err := parser.ParseDir(fileSet, path, func(info os.FileInfo) bool {
+			return strings.HasSuffix(info.Name(), ".go") && !strings.HasSuffix(info.Name(), "_test.go")
+		}, parser.ImportsOnly)
+		if err != nil {
+			return err
+		}
+		for _, pkg := range packages {
+			for fileName, file := range pkg.Files {
+				for _, spec := range file.Imports {
+					importPath, err := strconv.Unquote(spec.Path.Value)
+					if err != nil {
+						return fmt.Errorf("parse import in %s: %w", fileName, err)
+					}
+					if forbiddenModuleImport(importPath) {
+						t.Errorf("%s imports forbidden core package %q; modules must depend on injected contracts", fileSet.Position(spec.Pos()), importPath)
+					}
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func forbiddenModuleImport(importPath string) bool {
+	for _, core := range []string{
+		"gvideo/backend/internal/service",
+		"gvideo/backend/internal/repository",
+		"gvideo/backend/internal/httpapi",
+	} {
+		if importPath == core || strings.HasPrefix(importPath, core+"/") {
+			return true
+		}
+	}
+	return false
 }
