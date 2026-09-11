@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"net/http"
 	"strings"
@@ -61,7 +62,8 @@ func (h *Handler) requireAuth(next http.Handler) http.Handler {
 func (h *Handler) requireCSRF(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		provided := r.Header.Get("X-CSRF-Token")
-		if provided == "" || provided != sessionFrom(r.Context()).CSRFToken {
+		expected := sessionFrom(r.Context()).CSRFToken
+		if expected == "" || len(provided) != len(expected) || subtle.ConstantTimeCompare([]byte(provided), []byte(expected)) != 1 {
 			writeProblem(w, r, http.StatusForbidden, "页面凭证已过期，请刷新后重试")
 			return
 		}

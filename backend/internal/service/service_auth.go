@@ -47,10 +47,16 @@ func (s *Service) Register(ctx context.Context, username, password string) (Crea
 	return s.newSession(ctx, user)
 }
 
+// dummyPasswordHash is a precomputed bcrypt hash compared against whenever the
+// username is unknown, so missing-user and wrong-password logins take the same
+// code path and valid usernames cannot be enumerated by response timing.
+var dummyPasswordHash = []byte("$2a$10$5e1h02hsRoX5LsQAQ1kD/.TBCprciQKFP21X4LNYqpTeKJhMCcfWu")
+
 func (s *Service) Login(ctx context.Context, username, password string) (CreatedSession, error) {
 	user, hash, err := s.repo.UserAuthByUsername(ctx, strings.TrimSpace(username))
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
+			_ = bcrypt.CompareHashAndPassword(dummyPasswordHash, []byte(password))
 			return CreatedSession{}, domain.ErrUnauthorized
 		}
 		return CreatedSession{}, err

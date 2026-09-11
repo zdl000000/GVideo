@@ -31,5 +31,6 @@ GVideo 的重要变更记录在此。项目在首次正式发布后遵循语义�
 - 新增请求速率限制：登录/注册按客户端地址、评论与上传按用户分档限流，超限返回 429 与 `Retry-After`，额度可由 `RATE_LIMIT_*_PER_MINUTE` 配置；替换弃用的 chi RealIP，仅信任可信代理的 `X-Forwarded-For`（IPv6 按 /64 归一），网关与前端代理不再透传可伪造的 `True-Client-IP`。
 - 新增安全响应头：后端 API/媒体响应统一 `X-Frame-Options: DENY`、`Referrer-Policy`、`Permissions-Policy` 与 deny-all CSP；前端 Nginx 为 SPA 设置含 hls.js 所需 `blob:`/`worker:` 白名单的 CSP 并关闭 `server_tokens`；非生产环境管理端点绑定非 loopback 地址时新增 `diagnostics_binding_exposed` 启动警告。
 - 新增每用户上传存储配额 `USER_STORAGE_QUOTA_BYTES`（Compose 默认 20 GiB，0 表示禁用）：按「源视频 + 封面 + HLS 转码实际产出」累计，超出后新上传返回 413 `storage_quota_exceeded`，防止循环上传耗尽磁盘；新增迁移 v3 记录封面与 HLS 字节，自动生成封面与换封面同步计量。
+- 低危加固：登录对不存在用户执行等效 bcrypt 比较以防时序枚举；CSRF 比较改为恒定时间；搜索关键词转义 LIKE 通配符（`%`、`_`、`\`）防止全表匹配扫描。
 
 [未发布]: https://github.com/zdl000000/GVideo/commits/main

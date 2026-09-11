@@ -50,6 +50,10 @@ SELECT v.id, v.user_id, u.username, u.avatar_path, v.title, v.description, v.cat
        CASE WHEN ? > 0 AND EXISTS(SELECT 1 FROM video_favorites f2 WHERE f2.video_id = v.id AND f2.user_id = ?) THEN 1 ELSE 0 END
 FROM videos v JOIN users u ON u.id = v.user_id`
 
+// likeEscaper neutralizes LIKE wildcards in user search input so '%' and '_'
+// match literally and cannot be used to force broad pattern scans.
+var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+
 func videoFilterSQL(filter domain.VideoFilter) ([]string, []any) {
 	where := []string{"1 = 1"}
 	args := make([]any, 0, 5)
@@ -57,8 +61,8 @@ func videoFilterSQL(filter domain.VideoFilter) ([]string, []any) {
 		where = append(where, `v.visibility = 'public'`)
 	}
 	if filter.Query != "" {
-		where = append(where, `(v.title LIKE ? OR v.description LIKE ? OR u.username LIKE ?)`)
-		q := "%" + filter.Query + "%"
+		where = append(where, `(v.title LIKE ? ESCAPE '\' OR v.description LIKE ? ESCAPE '\' OR u.username LIKE ? ESCAPE '\')`)
+		q := "%" + likeEscaper.Replace(filter.Query) + "%"
 		args = append(args, q, q, q)
 	}
 	if filter.Category != "" {
