@@ -13,25 +13,28 @@ import (
 )
 
 type Config struct {
-	AppEnv                  string
-	HTTPAddr                string
-	FrontendURL             string
-	AdminUsername           string
-	DatabasePath            string
-	MediaDir                string
-	SessionTTL              time.Duration
-	MaxUploadBytes          int64
-	CookieSecure            bool
-	FFmpegPath              string
-	FFprobePath             string
-	MediaWorkerEnabled      bool
-	MediaWorkerPollInterval time.Duration
-	MediaProbeTimeout       time.Duration
-	HLSEnabled              bool
-	HLSTranscodeTimeout     time.Duration
-	HLSSegmentSeconds       int
-	MetricsAddr             string
-	PprofAddr               string
+	AppEnv                    string
+	HTTPAddr                  string
+	FrontendURL               string
+	AdminUsername             string
+	DatabasePath              string
+	MediaDir                  string
+	SessionTTL                time.Duration
+	MaxUploadBytes            int64
+	CookieSecure              bool
+	FFmpegPath                string
+	FFprobePath               string
+	MediaWorkerEnabled        bool
+	MediaWorkerPollInterval   time.Duration
+	MediaProbeTimeout         time.Duration
+	HLSEnabled                bool
+	HLSTranscodeTimeout       time.Duration
+	HLSSegmentSeconds         int
+	MetricsAddr               string
+	PprofAddr                 string
+	RateLimitAuthPerMinute    int
+	RateLimitCommentPerMinute int
+	RateLimitUploadPerMinute  int
 }
 
 func Load() (Config, error) {
@@ -82,6 +85,18 @@ func Load() (Config, error) {
 	}
 	metricsAddr := strings.TrimSpace(os.Getenv("METRICS_ADDR"))
 	pprofAddr := strings.TrimSpace(os.Getenv("PPROF_ADDR"))
+	rateLimitAuth, err := intEnv("RATE_LIMIT_AUTH_PER_MINUTE", 20)
+	if err != nil {
+		return Config{}, err
+	}
+	rateLimitComment, err := intEnv("RATE_LIMIT_COMMENT_PER_MINUTE", 30)
+	if err != nil {
+		return Config{}, err
+	}
+	rateLimitUpload, err := intEnv("RATE_LIMIT_UPLOAD_PER_MINUTE", 10)
+	if err != nil {
+		return Config{}, err
+	}
 	if appEnv == "production" {
 		if err := validateProductionDiagnosticsAddress("METRICS_ADDR", metricsAddr); err != nil {
 			return Config{}, err
@@ -101,26 +116,39 @@ func Load() (Config, error) {
 	}
 
 	return Config{
-		AppEnv:                  appEnv,
-		HTTPAddr:                env("HTTP_ADDR", ":8080"),
-		FrontendURL:             strings.TrimSuffix(frontendURL, "/"),
-		AdminUsername:           env("ADMIN_USERNAME", ""),
-		DatabasePath:            databasePath,
-		MediaDir:                mediaDir,
-		SessionTTL:              ttl,
-		MaxUploadBytes:          maxUpload,
-		CookieSecure:            secure,
-		FFmpegPath:              env("FFMPEG_PATH", "ffmpeg"),
-		FFprobePath:             env("FFPROBE_PATH", "ffprobe"),
-		MediaWorkerEnabled:      workerEnabled,
-		MediaWorkerPollInterval: pollInterval,
-		MediaProbeTimeout:       probeTimeout,
-		HLSEnabled:              hlsEnabled,
-		HLSTranscodeTimeout:     hlsTimeout,
-		HLSSegmentSeconds:       hlsSegmentSeconds,
-		MetricsAddr:             metricsAddr,
-		PprofAddr:               pprofAddr,
+		AppEnv:                    appEnv,
+		HTTPAddr:                  env("HTTP_ADDR", ":8080"),
+		FrontendURL:               strings.TrimSuffix(frontendURL, "/"),
+		AdminUsername:             env("ADMIN_USERNAME", ""),
+		DatabasePath:              databasePath,
+		MediaDir:                  mediaDir,
+		SessionTTL:                ttl,
+		MaxUploadBytes:            maxUpload,
+		CookieSecure:              secure,
+		FFmpegPath:                env("FFMPEG_PATH", "ffmpeg"),
+		FFprobePath:               env("FFPROBE_PATH", "ffprobe"),
+		MediaWorkerEnabled:        workerEnabled,
+		MediaWorkerPollInterval:   pollInterval,
+		MediaProbeTimeout:         probeTimeout,
+		HLSEnabled:                hlsEnabled,
+		HLSTranscodeTimeout:       hlsTimeout,
+		HLSSegmentSeconds:         hlsSegmentSeconds,
+		MetricsAddr:               metricsAddr,
+		PprofAddr:                 pprofAddr,
+		RateLimitAuthPerMinute:    rateLimitAuth,
+		RateLimitCommentPerMinute: rateLimitComment,
+		RateLimitUploadPerMinute:  rateLimitUpload,
 	}, nil
+}
+
+// intEnv reads a non-negative integer setting; zero disables the feature the
+// setting belongs to.
+func intEnv(key string, fallback int) (int, error) {
+	value, err := strconv.Atoi(env(key, strconv.Itoa(fallback)))
+	if err != nil || value < 0 {
+		return 0, fmt.Errorf("%s must be a non-negative integer", key)
+	}
+	return value, nil
 }
 
 func validateProductionDiagnosticsAddress(name, address string) error {

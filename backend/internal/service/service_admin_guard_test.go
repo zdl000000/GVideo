@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -145,5 +146,15 @@ func TestEmptyAdminNameNeverGrantsAdmin(t *testing.T) {
 	}
 	if created.User.IsAdmin {
 		t.Fatal("empty administrator name granted the admin flag")
+	}
+}
+
+// Malformed session cookies are rejected by shape before any database lookup.
+func TestAuthenticateRejectsMalformedSessionTokens(t *testing.T) {
+	svc, _, ctx := newAdminGuardService(t, "")
+	for _, token := range []string{"", "short", "not-a-token", strings.Repeat("Z", 64), strings.Repeat("a", 63), strings.Repeat("a", 65)} {
+		if _, err := svc.Authenticate(ctx, token); !errors.Is(err, domain.ErrInvalidSession) {
+			t.Fatalf("token %q error = %v, want ErrInvalidSession", token, err)
+		}
 	}
 }

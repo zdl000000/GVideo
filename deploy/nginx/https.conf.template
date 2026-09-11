@@ -72,8 +72,12 @@ server {
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        # Override (not append) so client-supplied X-Forwarded-For values are
+        # never trusted downstream; downstream rate limiting keys on the first
+        # entry, which is then the real peer address.
+        proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header True-Client-IP "";
         proxy_read_timeout 900s;
         proxy_send_timeout 900s;
     }
