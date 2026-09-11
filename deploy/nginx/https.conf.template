@@ -45,6 +45,16 @@ server {
     limit_req zone=gvideo_auth burst=10 nodelay;
     limit_req zone=gvideo_upload burst=3 nodelay;
 
+    # Edge security headers. They cover gateway-generated responses (rate
+    # limit 429, 502, /gateway-healthz); proxied responses receive the same
+    # set from the frontend origin, whose copies are hidden in location /
+    # so browsers see exactly one value per header. The SPA CSP is served by
+    # the frontend origin and passes through untouched.
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+
     ssl_certificate /etc/nginx/tls/fullchain.pem;
     ssl_certificate_key /etc/nginx/tls/privkey.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
@@ -80,6 +90,12 @@ server {
         proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto https;
         proxy_set_header True-Client-IP "";
+        # The edge re-adds these headers above; hiding the upstream copies
+        # keeps exactly one value per header for browsers.
+        proxy_hide_header X-Content-Type-Options;
+        proxy_hide_header X-Frame-Options;
+        proxy_hide_header Referrer-Policy;
+        proxy_hide_header Permissions-Policy;
         proxy_read_timeout 900s;
         proxy_send_timeout 900s;
     }
