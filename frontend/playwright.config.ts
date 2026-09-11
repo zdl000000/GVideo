@@ -1,6 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
 const baseURL = process.env.E2E_BASE_URL || "http://127.0.0.1:8088";
+const ignoreHTTPSErrors = process.env.E2E_IGNORE_HTTPS_ERRORS === "true";
 
 export default defineConfig({
   testDir: "./e2e",
@@ -13,6 +14,7 @@ export default defineConfig({
   reporter: [["list"], ["html", { outputFolder: "../tmp/playwright-report", open: "never" }]],
   use: {
     baseURL,
+    ignoreHTTPSErrors,
     locale: "zh-CN",
     screenshot: "only-on-failure",
     trace: "retain-on-failure"

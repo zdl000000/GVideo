@@ -56,7 +56,7 @@
 
 ## 部署、备份与恢复
 
-- 默认开发 Compose 的后端与前端端口只绑定 `127.0.0.1`。生产 HTTPS 通过独立 overlay 增加网关，HTTP 使用保留方法语义的 `308` 跳转，backend 必须覆盖为 `COOKIE_SECURE=true`；网关由 `HTTPS_PORT` 自动派生跳转端口后缀，healthcheck 必须同时探测 HTTP 和 HTTPS 入口。
+- 默认开发 Compose 的后端与前端端口只绑定 `127.0.0.1`。生产 HTTPS 通过独立 overlay 增加网关，HTTP 使用保留方法语义的 `308` 跳转，backend 必须覆盖为 `COOKIE_SECURE=true`；网关由 `HTTPS_PORT` 自动派生跳转端口后缀，healthcheck 必须同时探测 HTTP/HTTPS liveness 和经 frontend 到 backend `/readyz` 的 HTTPS readiness。网关必须动态解析重建后的 frontend 容器，readiness 使用短超时，且不得为登录、注册、上传等非幂等请求启用自动重试。
 - TLS 证书和私钥只能通过只读挂载或部署平台 secret 注入，不进入镜像、Compose 明文、环境变量值、Git 或备份包。HTTPS 网关必须保留上传大小、长请求超时和 `X-Forwarded-Proto=https`。
 - 合并 Compose 配置后必须检查最终端口、卷和 backend 环境，不能仅审查 overlay 源文件。基础前端端口即使保留，也只能绑定本机回环地址，不能成为公网 HTTP 绕过入口。
 - SQLite 在线备份使用 `VACUUM INTO`，禁止在 WAL 模式下只复制主 `.db` 文件。媒体归档必须通过只读卷挂载生成，不修改媒体卷，也不停止或删除现有容器和命名卷。
@@ -122,15 +122,3 @@
 - 媒体处理变更至少覆盖 JSON 解析、任务状态转换、旧数据库兼容、清晰度梯度、临时文件失败清理，以及可行时的一次真实 FFprobe/FFmpeg 集成验证。
 - 部署可靠性变更必须实际生成一次完整备份包并完成隔离恢复演练；验证 HTTPS overlay 的渲染配置、TLS 入口、HTTP 跳转、Secure Cookie 配置和基础 HTTP 回归。
 - 本阶段还必须通过后端测试与 vet、前端 `typecheck`/生产构建、`git diff --check`、Docker 双健康检查，以及不污染业务数据的桌面与移动端浏览器验收。
-
-## 本阶段验证记录
-
-2026-08-10 已在当前工作区真实完成：
-
-- 后端使用项目 `tmp/go-build` 作为 `GOCACHE`，通过 `go test ./... -count=1` 与 `go vet ./...`。
-- 前端通过 `npm run typecheck` 与 `npm run build`；构建只有 Vite 单 chunk 体积提示。
-- Docker 使用 `docker compose -f compose.yaml up --build -d` 完成镜像重建与启动，后端和前端健康接口均返回 `200`，两个持久命名卷保持存在。
-- 浏览器在桌面与 `390 × 844` 移动视口完成只读验收，覆盖首页、播放页、作者字幕管理入口、创作者工作台、投稿管理、独立登录布局、未登录关注动态回跳、深浅主题、焦点样式和横向溢出；控制台无警告或错误。
-- 匿名验收使用同一服务的 `localhost:8088` 隔离现有 `127.0.0.1` 登录 Cookie，`/following` 准确跳转到 `/auth?next=%2Ffollowing`；未填写凭证、提交表单、创建账号、上传内容或修改业务数据。
-
-上述浏览器条目已于 2026-08-12 在最新镜像完成复验：桌面与 `390 × 844` 移动视口均检查首页、作者空间、播放页作者/评论/推荐作者链接、关注动态、独立登录布局、深浅主题、移动菜单、横向溢出和投稿编辑弹窗焦点；弹窗背景语义隔离与 Escape 关闭正常，控制台无错误或警告。匿名关注动态验收使用 `localhost:8088` 隔离现有登录 Cookie，并确认跳转 `/auth?next=%2Ffollowing`。全程未填写凭证、提交表单、创建账号、上传内容或修改业务数据。

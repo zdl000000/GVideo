@@ -8,6 +8,8 @@ services:
     environment:
       APP_ENV: development
       HTTP_ADDR: :8080
+      METRICS_ADDR: ${METRICS_ADDR:-}
+      PPROF_ADDR: ${PPROF_ADDR:-}
       FRONTEND_URL: ${FRONTEND_URL:-http://127.0.0.1:8088}
       ADMIN_USERNAME: ${ADMIN_USERNAME:-}
       DATABASE_PATH: /app/data/gvideo.db
@@ -29,8 +31,9 @@ services:
     ports:
       - "127.0.0.1:8080:8080"
     restart: unless-stopped
+    stop_grace_period: 30s
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/readyz"]
       interval: 10s
       timeout: 3s
       retries: 5

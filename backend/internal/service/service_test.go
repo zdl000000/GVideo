@@ -120,83 +120,6 @@ func TestChangePasswordKeepsCurrentSessionAndRevokesOthers(t *testing.T) {
 	}
 }
 
-func TestReportVideoRulesAndUpsert(t *testing.T) {
-	dir := t.TempDir()
-	db, err := platform.OpenDatabase(filepath.Join(dir, "reports.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	repo := repository.New(db)
-	svc := New(repo, config.Config{SessionTTL: time.Hour, MediaDir: filepath.Join(dir, "media")}, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	ctx := context.Background()
-	author, err := repo.CreateUser(ctx, "report_author", "hash")
-	if err != nil {
-		t.Fatal(err)
-	}
-	reporter, err := repo.CreateUser(ctx, "report_viewer", "hash")
-	if err != nil {
-		t.Fatal(err)
-	}
-	video, err := repo.CreateVideo(ctx, domain.NewVideo{UserID: author.ID, Title: "Reportable video", Category: Categories[0], Visibility: "public", VideoPath: "videos/report.mp4", MimeType: "video/mp4", SizeBytes: 10})
-	if err != nil {
-		t.Fatal(err)
-	}
-	report, err := svc.ReportVideo(ctx, reporter.ID, video.ID, "spam", "first detail")
-	if err != nil || report.Status != "pending" || report.Detail != "first detail" {
-		t.Fatalf("first report = %#v err=%v", report, err)
-	}
-	updated, err := svc.ReportVideo(ctx, reporter.ID, video.ID, "copyright", "updated detail")
-	if err != nil || updated.ID != report.ID || updated.Reason != "copyright" || updated.Detail != "updated detail" {
-		t.Fatalf("updated report = %#v err=%v", updated, err)
-	}
-	if _, err := svc.ReportVideo(ctx, author.ID, video.ID, "spam", "self report"); err != domain.ErrForbidden {
-		t.Fatalf("self report error = %v, want forbidden", err)
-	}
-	if _, err := svc.ReportVideo(ctx, reporter.ID, video.ID, "invalid", "bad reason"); err != domain.ErrInvalidInput {
-		t.Fatalf("invalid reason error = %v, want invalid input", err)
-	}
-}
-
-func TestAdminReportReviewAuthorization(t *testing.T) {
-	dir := t.TempDir()
-	db, err := platform.OpenDatabase(filepath.Join(dir, "admin-reports.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	repo := repository.New(db)
-	svc := New(repo, config.Config{AdminUsername: "review_admin", MediaDir: filepath.Join(dir, "media")}, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	ctx := context.Background()
-	author, _ := repo.CreateUser(ctx, "admin_report_author", "hash")
-	reporter, _ := repo.CreateUser(ctx, "admin_report_viewer", "hash")
-	video, err := repo.CreateVideo(ctx, domain.NewVideo{UserID: author.ID, Title: "Review", Category: Categories[0], VideoPath: "videos/admin-review.mp4", MimeType: "video/mp4", SizeBytes: 10})
-	if err != nil {
-		t.Fatal(err)
-	}
-	report, err := svc.ReportVideo(ctx, reporter.ID, video.ID, "other", "needs review")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := svc.AdminVideoReports(ctx, "ordinary_user", "", 1, 20); err != domain.ErrForbidden {
-		t.Fatalf("ordinary list error = %v, want forbidden", err)
-	}
-	page, err := svc.AdminVideoReports(ctx, "REVIEW_ADMIN", "pending", 1, 20)
-	if err != nil || page.Total != 1 {
-		t.Fatalf("admin reports = %#v err=%v", page, err)
-	}
-	if _, err := svc.ReviewVideoReport(ctx, "ordinary_user", report.ID, "resolved"); err != domain.ErrForbidden {
-		t.Fatalf("ordinary review error = %v, want forbidden", err)
-	}
-	updated, err := svc.ReviewVideoReport(ctx, "review_admin", report.ID, "dismissed")
-	if err != nil || updated.Status != "dismissed" {
-		t.Fatalf("admin review = %#v err=%v", updated, err)
-	}
-	if _, err := svc.ReviewVideoReport(ctx, "review_admin", report.ID, "invalid"); err != domain.ErrInvalidInput {
-		t.Fatalf("invalid status error = %v, want invalid input", err)
-	}
-}
-
 func TestCreatorProfileAndFollowRules(t *testing.T) {
 	dir := t.TempDir()
 	db, err := platform.OpenDatabase(filepath.Join(dir, "test.db"))
@@ -622,6 +545,65 @@ func TestPublicVideoSanitizesProcessingFailure(t *testing.T) {
 	timeout := publicVideo(domain.Video{ProcessingStatus: "failed", ProcessingError: "transcode timeout"})
 	if !strings.Contains(timeout.ProcessingMessage, "超时") {
 		t.Fatalf("timeout message is not actionable: %q", timeout.ProcessingMessage)
+	}
+}
+
+func TestRemoveMediaPathLogsSafeContract(t *testing.T) {
+	tests := []struct {
+		name       string
+		mediaDir   func(t *testing.T) string
+		storedPath string
+		recursive  bool
+		wantClass  string
+	}{
+		{
+			name:       "invalid path",
+			mediaDir:   func(t *testing.T) string { return t.TempDir() },
+			storedPath: filepath.Join("..", "private", "cleanup-path-canary"),
+			wantClass:  "invalid_media_path",
+		},
+		{
+			name: "filesystem failure",
+			mediaDir: func(t *testing.T) string {
+				root := t.TempDir()
+				if err := os.Mkdir(filepath.Join(root, "non-empty-cleanup-canary"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(root, "non-empty-cleanup-canary", "child"), []byte("x"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				return root
+			},
+			storedPath: "non-empty-cleanup-canary",
+			wantClass:  "filesystem_failed",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var output bytes.Buffer
+			logger := slog.New(slog.NewJSONHandler(&output, nil))
+			svc := &Service{cfg: config.Config{MediaDir: test.mediaDir(t)}, logger: logger}
+			svc.removeMediaPath(test.storedPath, test.recursive)
+
+			var record map[string]any
+			if err := json.Unmarshal(bytes.TrimSpace(output.Bytes()), &record); err != nil {
+				t.Fatalf("decode cleanup log: %v; output=%q", err, output.String())
+			}
+			if record["event"] != "media_cleanup_failed" || record["error_class"] != test.wantClass {
+				t.Fatalf("unexpected cleanup log: %#v", record)
+			}
+			for _, forbidden := range []string{"path", "error"} {
+				if _, exists := record[forbidden]; exists {
+					t.Fatalf("unsafe field %q present: %#v", forbidden, record)
+				}
+			}
+			for _, canary := range []string{"cleanup-path-canary", "non-empty-cleanup-canary", test.storedPath, svc.cfg.MediaDir} {
+				if canary != "" && strings.Contains(output.String(), canary) {
+					t.Fatalf("cleanup log leaked %q: %s", canary, output.String())
+				}
+			}
+		})
 	}
 }
 

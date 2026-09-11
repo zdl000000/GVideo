@@ -40,7 +40,13 @@ type MergeStats struct {
 	Notifications int64
 }
 
+type migrationBackupFunc func(context.Context, *sql.DB, string, int) (string, error)
+
 func OpenDatabase(path string) (*sql.DB, error) {
+	return openDatabase(path, databaseMigrations, createMigrationBackup)
+}
+
+func openDatabase(path string, migrations []databaseMigration, backup migrationBackupFunc) (*sql.DB, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, fmt.Errorf("create database directory: %w", err)
 	}
@@ -53,7 +59,23 @@ func OpenDatabase(path string) (*sql.DB, error) {
 		db.Close()
 		return nil, fmt.Errorf("ping sqlite: %w", err)
 	}
-	if err := migrate(db); err != nil {
+
+	state, err := inspectMigrationState(context.Background(), db, migrations)
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+	if state.hasPending && state.hasPersistentData {
+		if backup == nil {
+			db.Close()
+			return nil, fmt.Errorf("create pre-migration backup: backup function is not configured")
+		}
+		if _, err := backup(context.Background(), db, path, state.targetVersion); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("create pre-migration backup: %w", err)
+		}
+	}
+	if err := runMigrations(db, migrations); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -81,8 +103,9 @@ func OpenDatabaseReadOnly(path string) (*sql.DB, error) {
 	return db, nil
 }
 
-func migrate(db *sql.DB) error {
-	const schema = `
+// baselineSchemaV1SQL is immutable because its contents are part of migration
+// version 1's checksum. Future schema changes must be appended as new versions.
+const baselineSchemaV1SQL = `
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   username TEXT NOT NULL COLLATE NOCASE UNIQUE,
@@ -209,7 +232,14 @@ CREATE TABLE IF NOT EXISTS transcoding_jobs (
 );
 CREATE INDEX IF NOT EXISTS idx_transcoding_jobs_claim ON transcoding_jobs(status, available_at, id);
 `
-	if _, err := db.Exec(schema); err != nil {
+
+type databaseExecutor interface {
+	Exec(query string, args ...any) (sql.Result, error)
+	Query(query string, args ...any) (*sql.Rows, error)
+}
+
+func migrateBaselineV1(db databaseExecutor) error {
+	if _, err := db.Exec(baselineSchemaV1SQL); err != nil {
 		return fmt.Errorf("migrate database: %w", err)
 	}
 	columns := []struct {
@@ -265,7 +295,7 @@ END`); err != nil {
 	return nil
 }
 
-func ensureColumn(db *sql.DB, table, name, definition string) (bool, error) {
+func ensureColumn(db databaseExecutor, table, name, definition string) (bool, error) {
 	rows, err := db.Query(`PRAGMA table_info(` + table + `)`)
 	if err != nil {
 		return false, err
@@ -568,12 +598,16 @@ func BackupDatabase(ctx context.Context, db *sql.DB, destination string) error {
 	if err := os.MkdirAll(filepath.Dir(absolute), 0o755); err != nil {
 		return fmt.Errorf("create backup directory: %w", err)
 	}
-	if _, err := os.Stat(absolute); err == nil {
-		return fmt.Errorf("backup destination already exists: %s", absolute)
+	return vacuumDatabaseInto(ctx, db, absolute)
+}
+
+func vacuumDatabaseInto(ctx context.Context, db *sql.DB, destination string) error {
+	if _, err := os.Stat(destination); err == nil {
+		return fmt.Errorf("backup destination already exists: %s", destination)
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("inspect backup destination: %w", err)
 	}
-	quoted := "'" + strings.ReplaceAll(filepath.ToSlash(absolute), "'", "''") + "'"
+	quoted := "'" + strings.ReplaceAll(filepath.ToSlash(destination), "'", "''") + "'"
 	if _, err := db.ExecContext(ctx, `VACUUM INTO `+quoted); err != nil {
 		return fmt.Errorf("backup sqlite database: %w", err)
 	}

@@ -10,6 +10,8 @@
 | --- | --- | --- |
 | `APP_ENV` | `development` | 运行环境标识 |
 | `HTTP_ADDR` | `:8080` | 后端监听地址 |
+| `METRICS_ADDR` | 空 | Prometheus 管理端监听地址；默认关闭，只允许绑定 loopback 或可信管理网络 |
+| `PPROF_ADDR` | 空 | Go pprof 管理端监听地址；默认关闭，不得暴露公网 |
 | `FRONTEND_URL` | `http://127.0.0.1:5173` | 前端公开入口，必须是无路径 Origin |
 | `ADMIN_USERNAME` | 空 | 指定现有用户名为管理员，大小写不敏感 |
 | `DATABASE_PATH` | `./data/gvideo.db` | SQLite 数据库路径 |
@@ -34,6 +36,10 @@
 | `TLS_KEY_FILE` | 无 | 仓库外私钥绝对路径 |
 
 真实密钥、证书、数据库和媒体不能进入 Git。
+
+backend 容器设置 `stop_grace_period: 30s`，长于应用的 15 秒优雅关闭超时。收到停止信号后 HTTP 与管理端口先停止接收请求，媒体 Worker 通过同一取消上下文退出；若转码子进程未及时响应取消，Docker 会在 30 秒宽限期结束后强制终止容器。
+
+`METRICS_ADDR` 与 `PPROF_ADDR` 是两个独立管理端口，均默认关闭。需要诊断时应绑定到 `127.0.0.1` 或隔离的可信管理网络，并由防火墙限制来源；反向代理不得公开 `/metrics` 或 `/debug/pprof/`。pprof 会暴露运行时与请求行为信息，仅在限时排障窗口启用，用完即关闭。
 
 ## Windows 开发环境
 
@@ -71,8 +77,12 @@ docker compose logs --tail 100 backend frontend
 默认入口：
 
 - 页面：`http://127.0.0.1:8088`
-- 后端健康检查：`http://127.0.0.1:8080/healthz`
+- 后端就绪检查：`http://127.0.0.1:8080/readyz`
+- 后端存活检查：`http://127.0.0.1:8080/livez`
+- 兼容健康端点：`http://127.0.0.1:8080/healthz`
 - 同源健康检查：`http://127.0.0.1:8088/healthz`
+
+`/livez` 仅用于确认后端进程与 HTTP 服务可响应；`/readyz` 在启动迁移完成后注入检查器，并要求 SQLite 在 1 秒内响应。两者都不检查媒体 Worker、队列、转码或外部命令。`/healthz` 保留原存活语义，backend Compose healthcheck 已切换到 `/readyz`。
 
 停止容器与项目网络：
 
@@ -132,9 +142,11 @@ docker compose -f compose.yaml -f compose.https.yaml config
 docker compose -f compose.yaml -f compose.https.yaml up --build -d
 ```
 
-生产预检会检查 HTTPS Origin、主机名、端口、管理员、固定卷名称、证书有效期、证书域名、证书与私钥匹配，并通过隔离的 `nginx -t` 验证网关配置。
+生产预检会检查 HTTPS Origin、主机名、端口、管理员、固定卷名称、证书有效期、证书域名、证书与私钥匹配，并通过隔离的 `nginx -t` 和渲染配置语义断言验证网关配置。预检不会启动完整服务，也不能替代运行态验收。
 
 生产入口应只公开网关端口。HTTP 使用 `308` 跳转 HTTPS，后端必须保持 `COOKIE_SECURE=true`。
+
+`/gateway-healthz` 只检查 Nginx HTTP/TLS 入口存活；`/gateway-readyz` 经 frontend 转发到 backend `/readyz`，检查完整上游链路和 SQLite readiness。生产负载均衡器应使用 HTTPS `/gateway-readyz` 决定是否分配新流量，并单独监控 `/gateway-healthz` 以区分网关故障和上游故障。Docker healthcheck 失败只会把容器标记为 `unhealthy`，`restart: unless-stopped` 不会因该状态自动重启容器。
 
 ## 云平台边界
 

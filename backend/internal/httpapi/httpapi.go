@@ -2,8 +2,6 @@ package httpapi
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,13 +13,14 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
 	"gvideo/backend/internal/config"
 	"gvideo/backend/internal/domain"
+	"gvideo/backend/internal/modules/moderation"
+	"gvideo/backend/internal/platform/metrics"
 	"gvideo/backend/internal/service"
 )
 
@@ -31,10 +30,17 @@ type contextKey string
 
 const sessionKey contextKey = "session"
 
+type ReadinessChecker interface {
+	Ready(context.Context) error
+}
+
 type Handler struct {
-	service *service.Service
-	cfg     config.Config
-	logger  *slog.Logger
+	service    *service.Service
+	moderation *moderation.Handler
+	readiness  ReadinessChecker
+	cfg        config.Config
+	logger     *slog.Logger
+	metrics    *metrics.Registry
 }
 
 type response struct {
@@ -43,8 +49,22 @@ type response struct {
 	RequestID string `json:"request_id"`
 }
 
-func New(service *service.Service, cfg config.Config, logger *slog.Logger) *Handler {
-	return &Handler{service: service, cfg: cfg, logger: logger}
+func New(service *service.Service, moderationService *moderation.Service, cfg config.Config, logger *slog.Logger, registries ...*metrics.Registry) *Handler {
+	var registry *metrics.Registry
+	if len(registries) > 0 {
+		registry = registries[0]
+	}
+	if registry == nil {
+		registry = metrics.New()
+	}
+	h := &Handler{service: service, cfg: cfg, logger: logger, metrics: registry}
+	h.moderation = moderation.NewHandler(moderationService, moderationHTTPPort{handler: h})
+	return h
+}
+
+func (h *Handler) WithReadiness(checker ReadinessChecker) *Handler {
+	h.readiness = checker
+	return h
 }
 
 func (h *Handler) Routes() http.Handler {
@@ -52,16 +72,20 @@ func (h *Handler) Routes() http.Handler {
 		panic(fmt.Errorf("create media directory: %w", err))
 	}
 	router := chi.NewRouter()
+	router.Use(h.instrument)
 	router.Use(h.requestID)
-	router.Use(h.recoverer)
 	router.Use(h.accessLog)
+	router.Use(h.recoverer)
 	router.Use(middleware.RealIP)
 	router.Use(middleware.Compress(5))
 	router.Use(h.responseHeaders)
 	router.Use(h.optionalSession)
 
 	router.Get("/", h.root)
-	router.Get("/healthz", h.health)
+	router.Get("/livez", h.livez)
+	router.Get("/readyz", h.readyz)
+	// /healthz remains an alias for clients and deployments that predate /livez.
+	router.Get("/healthz", h.livez)
 	router.Get("/media/*", h.media)
 	router.Route("/api/v1", func(api chi.Router) {
 		api.Get("/categories", h.categories)
@@ -75,8 +99,8 @@ func (h *Handler) Routes() http.Handler {
 		api.With(h.requireAuth).Get("/me/notifications", h.notifications)
 		api.With(h.requireAuth, h.requireCSRF).Patch("/me/notifications/{notificationID}/read", h.markNotificationRead)
 		api.With(h.requireAuth, h.requireCSRF).Post("/me/notifications/read-all", h.markAllNotificationsRead)
-		api.With(h.requireAuth).Get("/admin/reports", h.adminReports)
-		api.With(h.requireAuth, h.requireCSRF).Patch("/admin/reports/{reportID}", h.reviewReport)
+		api.With(h.requireAuth).Get("/admin/reports", h.moderation.AdminReports)
+		api.With(h.requireAuth, h.requireCSRF).Patch("/admin/reports/{reportID}", h.moderation.ReviewReport)
 
 		api.Get("/videos", h.listVideos)
 		api.Get("/videos/{videoID}", h.getVideo)
@@ -90,7 +114,7 @@ func (h *Handler) Routes() http.Handler {
 		api.With(h.requireAuth, h.requireCSRF).Delete("/videos/{videoID}/subtitles/{subtitleID}", h.deleteSubtitle)
 		api.With(h.requireAuth, h.requireCSRF).Post("/videos/{videoID}/like", h.toggleLike)
 		api.With(h.requireAuth, h.requireCSRF).Post("/videos/{videoID}/favorite", h.toggleFavorite)
-		api.With(h.requireAuth, h.requireCSRF).Post("/videos/{videoID}/reports", h.reportVideo)
+		api.With(h.requireAuth, h.requireCSRF).Post("/videos/{videoID}/reports", h.moderation.ReportVideo)
 		api.With(h.requireAuth, h.requireCSRF).Post("/videos/{videoID}/comments", h.createComment)
 		api.With(h.requireAuth, h.requireCSRF).Delete("/videos/{videoID}/comments/{commentID}", h.deleteComment)
 		api.With(h.requireAuth).Get("/me/videos", h.myVideos)
@@ -116,7 +140,11 @@ func (h *Handler) media(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := h.service.AuthorizeMedia(r.Context(), cleanPath, viewerID(r.Context())); err != nil {
 		if !errors.Is(err, domain.ErrNotFound) {
-			h.logger.Error("authorize media", "request_id", requestID(r), "path", cleanPath, "error", err)
+			h.logger.Error("media authorization failed",
+				"event", "http_handler_error",
+				"request_id", requestID(r),
+				"error_class", "media_authorization_failed",
+			)
 		}
 		http.NotFound(w, r)
 		return
@@ -161,8 +189,16 @@ func resolveServedMediaPath(root, storedPath string) (string, error) {
 	return realResolved, nil
 }
 
-func (h *Handler) health(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) livez(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, r, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (h *Handler) readyz(w http.ResponseWriter, r *http.Request) {
+	if h.readiness == nil || h.readiness.Ready(r.Context()) != nil {
+		writeProblem(w, r, http.StatusServiceUnavailable, "服务尚未就绪")
+		return
+	}
+	writeJSON(w, r, http.StatusOK, map[string]string{"status": "ready"})
 }
 
 func (h *Handler) root(w http.ResponseWriter, r *http.Request) {
@@ -171,603 +207,6 @@ func (h *Handler) root(w http.ResponseWriter, r *http.Request) {
 		"status":   "ok",
 		"frontend": h.cfg.FrontendURL,
 		"health":   "/healthz",
-	})
-}
-
-func (h *Handler) categories(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, r, http.StatusOK, service.Categories)
-}
-
-func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
-	var input struct {
-		Username string `json:"username"`
-		Password string `json:"password"`
-	}
-	if !decodeJSON(w, r, &input) {
-		return
-	}
-	created, err := h.service.Register(r.Context(), input.Username, input.Password)
-	if err != nil {
-		h.writeError(w, r, err)
-		return
-	}
-	h.setSessionCookie(w, created.Token)
-	w.Header().Set("X-CSRF-Token", created.CSRFToken)
-	writeJSON(w, r, http.StatusCreated, map[string]any{"user": created.User, "csrf_token": created.CSRFToken})
-}
-
-func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
-	var input struct {
-		Username string `json:"username"`
-		Password string `json:"password"`
-	}
-	if !decodeJSON(w, r, &input) {
-		return
-	}
-	created, err := h.service.Login(r.Context(), input.Username, input.Password)
-	if err != nil {
-		h.writeError(w, r, err)
-		return
-	}
-	h.setSessionCookie(w, created.Token)
-	w.Header().Set("X-CSRF-Token", created.CSRFToken)
-	writeJSON(w, r, http.StatusOK, map[string]any{"user": created.User, "csrf_token": created.CSRFToken})
-}
-
-func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
-	cookie, _ := r.Cookie(sessionCookie)
-	if cookie != nil {
-		if err := h.service.Logout(r.Context(), cookie.Value); err != nil {
-			h.writeError(w, r, err)
-			return
-		}
-	}
-	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, Secure: h.cfg.CookieSecure, SameSite: http.SameSiteLaxMode})
-	writeJSON(w, r, http.StatusOK, map[string]bool{"logged_out": true})
-}
-
-func (h *Handler) me(w http.ResponseWriter, r *http.Request) {
-	session := sessionFrom(r.Context())
-	writeJSON(w, r, http.StatusOK, map[string]any{"user": session.User, "csrf_token": session.CSRFToken})
-}
-
-func (h *Handler) changePassword(w http.ResponseWriter, r *http.Request) {
-	var input struct {
-		CurrentPassword string `json:"current_password"`
-		NewPassword     string `json:"new_password"`
-	}
-	if !decodeJSON(w, r, &input) {
-		return
-	}
-	cookie, err := r.Cookie(sessionCookie)
-	if err != nil || cookie.Value == "" {
-		writeProblem(w, r, http.StatusUnauthorized, "Authentication required")
-		return
-	}
-	if err := h.service.ChangePassword(r.Context(), sessionFrom(r.Context()).User.ID, cookie.Value, input.CurrentPassword, input.NewPassword); err != nil {
-		h.writeError(w, r, err)
-		return
-	}
-	writeJSON(w, r, http.StatusOK, map[string]bool{"changed": true})
-}
-
-func (h *Handler) updateProfile(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, 11<<20)
-	if err := r.ParseMultipartForm(11 << 20); err != nil {
-		writeProblem(w, r, http.StatusBadRequest, "资料内容过大或格式无效")
-		return
-	}
-	avatar, err := fileHeader(r, "avatar", false)
-	if err != nil {
-		writeProblem(w, r, http.StatusBadRequest, "头像文件无效")
-		return
-	}
-	updated, err := h.service.UpdateProfile(r.Context(), service.UpdateProfileInput{
-		UserID: sessionFrom(r.Context()).User.ID, Username: r.FormValue("username"),
-		Bio: r.FormValue("bio"), Avatar: avatar,
-	})
-	if err != nil {
-		h.writeError(w, r, err)
-		return
-	}
-	writeJSON(w, r, http.StatusOK, updated)
-}
-
-func (h *Handler) creatorStats(w http.ResponseWriter, r *http.Request) {
-	stats, err := h.service.CreatorStats(r.Context(), sessionFrom(r.Context()).User.ID)
-	if err != nil {
-		h.writeError(w, r, err)
-		return
-	}
-	writeJSON(w, r, http.StatusOK, stats)
-}
-
-func (h *Handler) notifications(w http.ResponseWriter, r *http.Request) {
-	page, pageSize := pagination(r, 20)
-	result, err := h.service.Notifications(r.Context(), sessionFrom(r.Context()).User.ID, page, pageSize)
-	if err != nil {
-		h.writeError(w, r, err)
-		return
-	}
-	writeJSON(w, r, http.StatusOK, result)
-}
-
-func (h *Handler) markNotificationRead(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.ParseInt(chi.URLParam(r, "notificationID"), 10, 64)
-	if err != nil || id <= 0 {
-		writeProblem(w, r, http.StatusBadRequest, "通知编号无效")
-		return
-	}
-	if err := h.service.MarkNotificationRead(r.Context(), sessionFrom(r.Context()).User.ID, id); err != nil {
-		h.writeError(w, r, err)
-		return
-	}
-	writeJSON(w, r, http.StatusOK, map[string]bool{"read": true})
-}
-
-func (h *Handler) markAllNotificationsRead(w http.ResponseWriter, r *http.Request) {
-	if err := h.service.MarkAllNotificationsRead(r.Context(), sessionFrom(r.Context()).User.ID); err != nil {
-		h.writeError(w, r, err)
-		return
-	}
-	writeJSON(w, r, http.StatusOK, map[string]bool{"read": true})
-}
-
-func (h *Handler) listVideos(w http.ResponseWriter, r *http.Request) {
-	page, pageSize := pagination(r, 24)
-	filter := domain.VideoFilter{
-		Query: r.URL.Query().Get("q"), Category: r.URL.Query().Get("category"), Sort: r.URL.Query().Get("sort"),
-		Limit: pageSize, Offset: (page - 1) * pageSize,
-	}
-	result, err := h.service.ListVideos(r.Context(), filter, viewerID(r.Context()))
-	if err != nil {
-		h.writeError(w, r, err)
-		return
-	}
-	writeJSON(w, r, http.StatusOK, result)
-}
-
-func (h *Handler) myVideos(w http.ResponseWriter, r *http.Request) {
-	userID := sessionFrom(r.Context()).User.ID
-	page, pageSize := pagination(r, 12)
-	result, err := h.service.ListVideos(r.Context(), domain.VideoFilter{
-		UserID: userID, IncludeNonPublic: true, Limit: pageSize, Offset: (page - 1) * pageSize,
-	}, userID)
-	if err != nil {
-		h.writeError(w, r, err)
-		return
-	}
-	writeJSON(w, r, http.StatusOK, result)
-}
-
-func (h *Handler) followingVideos(w http.ResponseWriter, r *http.Request) {
-	userID := sessionFrom(r.Context()).User.ID
-	page, pageSize := pagination(r, 24)
-	result, err := h.service.ListVideos(r.Context(), domain.VideoFilter{
-		FollowingUserID: userID, Limit: pageSize, Offset: (page - 1) * pageSize,
-	}, userID)
-	if err != nil {
-		h.writeError(w, r, err)
-		return
-	}
-	writeJSON(w, r, http.StatusOK, result)
-}
-
-func (h *Handler) favoriteVideos(w http.ResponseWriter, r *http.Request) {
-	userID := sessionFrom(r.Context()).User.ID
-	page, pageSize := pagination(r, 24)
-	result, err := h.service.ListVideos(r.Context(), domain.VideoFilter{
-		FavoriteUserID: userID, Limit: pageSize, Offset: (page - 1) * pageSize,
-	}, userID)
-	if err != nil {
-		h.writeError(w, r, err)
-		return
-	}
-	writeJSON(w, r, http.StatusOK, result)
-}
-
-func (h *Handler) getCreator(w http.ResponseWriter, r *http.Request) {
-	id, ok := userPathID(w, r)
-	if !ok {
-		return
-	}
-	profile, err := h.service.CreatorProfile(r.Context(), id, viewerID(r.Context()))
-	if err != nil {
-		h.writeError(w, r, err)
-		return
-	}
-	writeJSON(w, r, http.StatusOK, profile)
-}
-
-func (h *Handler) creatorVideos(w http.ResponseWriter, r *http.Request) {
-	id, ok := userPathID(w, r)
-	if !ok {
-		return
-	}
-	if _, err := h.service.CreatorProfile(r.Context(), id, viewerID(r.Context())); err != nil {
-		h.writeError(w, r, err)
-		return
-	}
-	page, pageSize := pagination(r, 12)
-	result, err := h.service.ListVideos(r.Context(), domain.VideoFilter{UserID: id, Limit: pageSize, Offset: (page - 1) * pageSize}, viewerID(r.Context()))
-	if err != nil {
-		h.writeError(w, r, err)
-		return
-	}
-	writeJSON(w, r, http.StatusOK, result)
-}
-
-func (h *Handler) toggleFollow(w http.ResponseWriter, r *http.Request) {
-	id, ok := userPathID(w, r)
-	if !ok {
-		return
-	}
-	active, err := h.service.ToggleFollow(r.Context(), sessionFrom(r.Context()).User.ID, id)
-	if err != nil {
-		h.writeError(w, r, err)
-		return
-	}
-	writeJSON(w, r, http.StatusOK, map[string]bool{"active": active})
-}
-
-func (h *Handler) getVideo(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r)
-	if !ok {
-		return
-	}
-	video, err := h.service.Video(r.Context(), id, viewerID(r.Context()), r.URL.Query().Get("count_view") != "false")
-	if err != nil {
-		h.writeError(w, r, err)
-		return
-	}
-	writeJSON(w, r, http.StatusOK, video)
-}
-
-func (h *Handler) uploadVideo(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, h.cfg.MaxUploadBytes+(12<<20))
-	if err := r.ParseMultipartForm(32 << 20); err != nil {
-		writeProblem(w, r, http.StatusBadRequest, "上传内容无效或文件过大")
-		return
-	}
-	video, err := fileHeader(r, "video", true)
-	if err != nil {
-		writeProblem(w, r, http.StatusBadRequest, "请选择支持的视频文件")
-		return
-	}
-	cover, _ := fileHeader(r, "cover", false)
-	subtitle, subtitleErr := fileHeader(r, "subtitle", false)
-	if subtitleErr != nil {
-		writeProblem(w, r, http.StatusBadRequest, "字幕文件无效")
-		return
-	}
-	created, err := h.service.UploadVideo(r.Context(), service.UploadInput{
-		UserID: sessionFrom(r.Context()).User.ID, Title: r.FormValue("title"), Description: r.FormValue("description"),
-		Category: r.FormValue("category"), Visibility: r.FormValue("visibility"), Video: video, Cover: cover, Subtitle: subtitle,
-		SubtitleLanguage: r.FormValue("subtitle_language"), SubtitleLabel: r.FormValue("subtitle_label"),
-	})
-	if err != nil {
-		h.writeError(w, r, err)
-		return
-	}
-	writeJSON(w, r, http.StatusCreated, created)
-}
-
-func (h *Handler) uploadSubtitle(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r)
-	if !ok {
-		return
-	}
-	r.Body = http.MaxBytesReader(w, r.Body, 3<<20)
-	if err := r.ParseMultipartForm(3 << 20); err != nil {
-		writeProblem(w, r, http.StatusBadRequest, "字幕上传内容无效")
-		return
-	}
-	header, err := fileHeader(r, "subtitle", true)
-	if err != nil {
-		writeProblem(w, r, http.StatusBadRequest, "请选择字幕文件")
-		return
-	}
-	track, err := h.service.AddSubtitle(r.Context(), sessionFrom(r.Context()).User.ID, id, header, r.FormValue("subtitle_language"), r.FormValue("subtitle_label"))
-	if err != nil {
-		h.writeError(w, r, err)
-		return
-	}
-	writeJSON(w, r, http.StatusCreated, track)
-}
-
-func (h *Handler) setDefaultSubtitle(w http.ResponseWriter, r *http.Request) {
-	videoID, ok := pathID(w, r)
-	if !ok {
-		return
-	}
-	subtitleID, ok := subtitlePathID(w, r)
-	if !ok {
-		return
-	}
-	tracks, err := h.service.SetDefaultSubtitle(r.Context(), sessionFrom(r.Context()).User.ID, videoID, subtitleID)
-	if err != nil {
-		h.writeError(w, r, err)
-		return
-	}
-	writeJSON(w, r, http.StatusOK, tracks)
-}
-
-func (h *Handler) deleteSubtitle(w http.ResponseWriter, r *http.Request) {
-	videoID, ok := pathID(w, r)
-	if !ok {
-		return
-	}
-	subtitleID, ok := subtitlePathID(w, r)
-	if !ok {
-		return
-	}
-	tracks, err := h.service.DeleteSubtitle(r.Context(), sessionFrom(r.Context()).User.ID, videoID, subtitleID)
-	if err != nil {
-		h.writeError(w, r, err)
-		return
-	}
-	writeJSON(w, r, http.StatusOK, tracks)
-}
-
-func (h *Handler) updateVideo(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r)
-	if !ok {
-		return
-	}
-	r.Body = http.MaxBytesReader(w, r.Body, 12<<20)
-	if err := r.ParseMultipartForm(12 << 20); err != nil {
-		writeProblem(w, r, http.StatusBadRequest, "编辑内容过大或格式无效")
-		return
-	}
-	cover, err := fileHeader(r, "cover", false)
-	if err != nil {
-		writeProblem(w, r, http.StatusBadRequest, "封面文件无效")
-		return
-	}
-	updated, err := h.service.UpdateVideo(r.Context(), service.UpdateVideoInput{
-		UserID: sessionFrom(r.Context()).User.ID, VideoID: id,
-		Title: r.FormValue("title"), Description: r.FormValue("description"), Category: r.FormValue("category"),
-		Visibility: r.FormValue("visibility"), Cover: cover,
-	})
-	if err != nil {
-		h.writeError(w, r, err)
-		return
-	}
-	writeJSON(w, r, http.StatusOK, updated)
-}
-
-func (h *Handler) deleteVideo(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r)
-	if !ok {
-		return
-	}
-	if err := h.service.DeleteVideo(r.Context(), sessionFrom(r.Context()).User.ID, id); err != nil {
-		h.writeError(w, r, err)
-		return
-	}
-	writeJSON(w, r, http.StatusOK, map[string]bool{"deleted": true})
-}
-
-func (h *Handler) retryVideo(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r)
-	if !ok {
-		return
-	}
-	if err := h.service.RetryTranscoding(r.Context(), sessionFrom(r.Context()).User.ID, id); err != nil {
-		h.writeError(w, r, err)
-		return
-	}
-	writeJSON(w, r, http.StatusAccepted, map[string]string{"processing_status": "pending"})
-}
-
-func (h *Handler) toggleLike(w http.ResponseWriter, r *http.Request) {
-	h.toggle(w, r, h.service.ToggleLike)
-}
-
-func (h *Handler) toggleFavorite(w http.ResponseWriter, r *http.Request) {
-	h.toggle(w, r, h.service.ToggleFavorite)
-}
-
-func (h *Handler) reportVideo(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r)
-	if !ok {
-		return
-	}
-	var input struct {
-		Reason string `json:"reason"`
-		Detail string `json:"detail"`
-	}
-	if !decodeJSON(w, r, &input) {
-		return
-	}
-	report, err := h.service.ReportVideo(r.Context(), sessionFrom(r.Context()).User.ID, id, input.Reason, input.Detail)
-	if err != nil {
-		h.writeError(w, r, err)
-		return
-	}
-	writeJSON(w, r, http.StatusCreated, report)
-}
-
-func (h *Handler) adminReports(w http.ResponseWriter, r *http.Request) {
-	page, pageSize := pagination(r, 20)
-	result, err := h.service.AdminVideoReports(r.Context(), sessionFrom(r.Context()).User.Username, r.URL.Query().Get("status"), page, pageSize)
-	if err != nil {
-		h.writeError(w, r, err)
-		return
-	}
-	writeJSON(w, r, http.StatusOK, result)
-}
-
-func (h *Handler) reviewReport(w http.ResponseWriter, r *http.Request) {
-	reportID, err := strconv.ParseInt(chi.URLParam(r, "reportID"), 10, 64)
-	if err != nil || reportID <= 0 {
-		h.writeError(w, r, domain.ErrInvalidInput)
-		return
-	}
-	var input struct {
-		Status string `json:"status"`
-	}
-	if !decodeJSON(w, r, &input) {
-		return
-	}
-	report, err := h.service.ReviewVideoReport(r.Context(), sessionFrom(r.Context()).User.Username, reportID, input.Status)
-	if err != nil {
-		h.writeError(w, r, err)
-		return
-	}
-	writeJSON(w, r, http.StatusOK, report)
-}
-
-func (h *Handler) toggle(w http.ResponseWriter, r *http.Request, action func(context.Context, int64, int64) (bool, error)) {
-	id, ok := pathID(w, r)
-	if !ok {
-		return
-	}
-	active, err := action(r.Context(), sessionFrom(r.Context()).User.ID, id)
-	if err != nil {
-		h.writeError(w, r, err)
-		return
-	}
-	writeJSON(w, r, http.StatusOK, map[string]bool{"active": active})
-}
-
-func (h *Handler) listComments(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r)
-	if !ok {
-		return
-	}
-	comments, err := h.service.Comments(r.Context(), id, viewerID(r.Context()))
-	if err != nil {
-		h.writeError(w, r, err)
-		return
-	}
-	if comments == nil {
-		comments = []domain.Comment{}
-	}
-	writeJSON(w, r, http.StatusOK, comments)
-}
-
-func (h *Handler) createComment(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r)
-	if !ok {
-		return
-	}
-	var input struct {
-		Content string `json:"content"`
-	}
-	if !decodeJSON(w, r, &input) {
-		return
-	}
-	comment, err := h.service.CreateComment(r.Context(), sessionFrom(r.Context()).User.ID, id, input.Content)
-	if err != nil {
-		h.writeError(w, r, err)
-		return
-	}
-	writeJSON(w, r, http.StatusCreated, comment)
-}
-
-func (h *Handler) deleteComment(w http.ResponseWriter, r *http.Request) {
-	videoID, ok := pathID(w, r)
-	if !ok {
-		return
-	}
-	commentID, err := strconv.ParseInt(chi.URLParam(r, "commentID"), 10, 64)
-	if err != nil || commentID <= 0 {
-		writeProblem(w, r, http.StatusBadRequest, "无效的评论编号")
-		return
-	}
-	if err := h.service.DeleteComment(r.Context(), sessionFrom(r.Context()).User.ID, videoID, commentID); err != nil {
-		h.writeError(w, r, err)
-		return
-	}
-	writeJSON(w, r, http.StatusOK, map[string]bool{"deleted": true})
-}
-
-func (h *Handler) optionalSession(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		cookie, err := r.Cookie(sessionCookie)
-		if err == nil && cookie.Value != "" {
-			session, authErr := h.service.Authenticate(r.Context(), cookie.Value)
-			if authErr == nil {
-				r = r.WithContext(context.WithValue(r.Context(), sessionKey, session))
-			}
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-func (h *Handler) responseHeaders(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		if strings.HasPrefix(r.URL.Path, "/api/v1/auth/") ||
-			strings.HasPrefix(r.URL.Path, "/api/v1/me/") ||
-			strings.HasPrefix(r.URL.Path, "/api/v1/admin/") {
-			w.Header().Set("Cache-Control", "no-store")
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-func (h *Handler) requireAuth(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if sessionFrom(r.Context()).User.ID == 0 {
-			writeProblem(w, r, http.StatusUnauthorized, "请先登录")
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-func (h *Handler) requireCSRF(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		provided := r.Header.Get("X-CSRF-Token")
-		if provided == "" || provided != sessionFrom(r.Context()).CSRFToken {
-			writeProblem(w, r, http.StatusForbidden, "页面凭证已过期，请刷新后重试")
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-func (h *Handler) requestID(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestID := strings.TrimSpace(r.Header.Get("X-Request-ID"))
-		if requestID == "" {
-			buffer := make([]byte, 12)
-			_, _ = rand.Read(buffer)
-			requestID = hex.EncodeToString(buffer)
-		}
-		w.Header().Set("X-Request-ID", requestID)
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), middleware.RequestIDKey, requestID)))
-	})
-}
-
-func (h *Handler) recoverer(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer func() {
-			if recovered := recover(); recovered != nil {
-				h.logger.Error("panic recovered", "request_id", requestID(r), "panic", recovered)
-				writeProblem(w, r, http.StatusInternalServerError, "服务暂时不可用")
-			}
-		}()
-		next.ServeHTTP(w, r)
-	})
-}
-
-func (h *Handler) accessLog(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		wrapped := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
-		start := time.Now()
-		next.ServeHTTP(wrapped, r)
-		h.logger.Info("http request", "request_id", requestID(r), "method", r.Method, "path", r.URL.Path,
-			"status", wrapped.Status(), "bytes", wrapped.BytesWritten(), "duration_ms", time.Since(start).Milliseconds())
-	})
-}
-
-func (h *Handler) setSessionCookie(w http.ResponseWriter, token string) {
-	http.SetCookie(w, &http.Cookie{
-		Name: sessionCookie, Value: token, Path: "/", MaxAge: int(h.cfg.SessionTTL.Seconds()),
-		HttpOnly: true, Secure: h.cfg.CookieSecure, SameSite: http.SameSiteLaxMode,
 	})
 }
 
@@ -790,7 +229,11 @@ func (h *Handler) writeError(w http.ResponseWriter, r *http.Request, err error) 
 	case errors.Is(err, domain.ErrNotFound):
 		writeProblem(w, r, http.StatusNotFound, "内容不存在")
 	default:
-		h.logger.Error("request failed", "request_id", requestID(r), "error", err)
+		h.logger.Error("request failed",
+			"event", "http_handler_error",
+			"request_id", requestID(r),
+			"error_class", "internal_error",
+		)
 		writeProblem(w, r, http.StatusInternalServerError, "服务暂时不可用")
 	}
 }
@@ -893,7 +336,26 @@ func sessionFrom(ctx context.Context) domain.Session {
 
 func viewerID(ctx context.Context) int64 { return sessionFrom(ctx).User.ID }
 
-func requestID(r *http.Request) string {
-	value, _ := r.Context().Value(middleware.RequestIDKey).(string)
-	return value
+// moderationHTTPPort adapts application HTTP concerns without exposing the
+// httpapi package to the moderation module.
+type moderationHTTPPort struct{ handler *Handler }
+
+func (p moderationHTTPPort) Principal(ctx context.Context) moderation.Principal {
+	session := sessionFrom(ctx)
+	return moderation.Principal{UserID: session.User.ID, Username: session.User.Username}
+}
+func (p moderationHTTPPort) DecodeJSON(w http.ResponseWriter, r *http.Request, target any) bool {
+	return decodeJSON(w, r, target)
+}
+func (p moderationHTTPPort) WriteJSON(w http.ResponseWriter, r *http.Request, status int, data any) {
+	writeJSON(w, r, status, data)
+}
+func (p moderationHTTPPort) WriteError(w http.ResponseWriter, r *http.Request, err error) {
+	p.handler.writeError(w, r, err)
+}
+func (p moderationHTTPPort) VideoID(w http.ResponseWriter, r *http.Request) (int64, bool) {
+	return pathID(w, r)
+}
+func (p moderationHTTPPort) Pagination(r *http.Request, defaultSize int) (int, int) {
+	return pagination(r, defaultSize)
 }
