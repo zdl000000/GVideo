@@ -22,10 +22,10 @@ func (r *Repository) SessionByHash(ctx context.Context, tokenHash string) (domai
 	var session domain.Session
 	var avatarPath string
 	err := r.db.QueryRowContext(ctx, `
-SELECT u.id, u.username, u.bio, u.avatar_path, u.created_at, s.csrf_token, s.expires_at
+SELECT u.id, u.username, u.bio, u.avatar_path, u.created_at, u.is_admin, s.csrf_token, s.expires_at
 FROM sessions s JOIN users u ON u.id = s.user_id
 WHERE s.token_hash = ? AND s.expires_at > CURRENT_TIMESTAMP`, tokenHash).
-		Scan(&session.User.ID, &session.User.Username, &session.User.Bio, &avatarPath, &session.User.CreatedAt, &session.CSRFToken, &session.ExpiresAt)
+		Scan(&session.User.ID, &session.User.Username, &session.User.Bio, &avatarPath, &session.User.CreatedAt, &session.User.IsAdmin, &session.CSRFToken, &session.ExpiresAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Session{}, domain.ErrInvalidSession
 	}

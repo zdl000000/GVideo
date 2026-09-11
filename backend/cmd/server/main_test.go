@@ -7,11 +7,15 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"gvideo/backend/internal/config"
+	"gvideo/backend/internal/platform"
 	"gvideo/backend/internal/platform/metrics"
+	"gvideo/backend/internal/repository"
 )
 
 func TestStartupStorageLogsDoNotExposePaths(t *testing.T) {
@@ -124,6 +128,64 @@ func TestStartAdminServersFailsFastWhenPortIsOccupied(t *testing.T) {
 				t.Fatalf("port collision did not fail fast: %s", elapsed)
 			}
 		})
+	}
+}
+
+func TestDataGrantAdminCommand(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "grant-admin.db")
+	db, err := platform.OpenDatabase(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := repository.New(db)
+	user, err := repo.CreateUser(ctx, "ops_admin", "hash")
+	if err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	if user.IsAdmin {
+		db.Close()
+		t.Fatal("new user unexpectedly has admin flag")
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.Config{DatabasePath: path}
+	if err := runDataCommand(ctx, cfg, []string{"data-grant-admin"}); err == nil || !strings.Contains(err.Error(), "usage") {
+		t.Fatalf("missing username error = %v", err)
+	}
+	if err := runDataCommand(ctx, cfg, []string{"data-grant-admin", "missing_user"}); err == nil {
+		t.Fatal("granting admin to a missing user succeeded")
+	}
+	if err := runDataCommand(ctx, cfg, []string{"data-grant-admin", " ops_admin "}); err != nil {
+		t.Fatalf("grant admin: %v", err)
+	}
+	// Granting again is idempotent and must not report a missing user.
+	if err := runDataCommand(ctx, cfg, []string{"data-grant-admin", "ops_admin"}); err != nil {
+		t.Fatalf("re-grant admin: %v", err)
+	}
+
+	verify, err := platform.OpenDatabase(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer verify.Close()
+	verifyRepo := repository.New(verify)
+	hasAdmin, err := verifyRepo.HasAdmin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasAdmin {
+		t.Fatal("admin flag was not persisted")
+	}
+	granted, err := verifyRepo.UserByID(ctx, user.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !granted.IsAdmin {
+		t.Fatalf("granted user is_admin = false: %#v", granted)
 	}
 }
 

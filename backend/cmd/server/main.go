@@ -9,6 +9,7 @@ import (
 	httppprof "net/http/pprof"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -47,8 +48,22 @@ func main() {
 	logger.Info("storage initialized", "event", "storage_initialized")
 
 	repo := repository.New(db)
+	if cfg.AdminUsername != "" {
+		if !service.ValidUsername(cfg.AdminUsername) {
+			logger.Error("ADMIN_USERNAME is not a valid username", "event", "admin_username_invalid")
+			os.Exit(1)
+		}
+		hasAdmin, err := repo.HasAdmin(context.Background())
+		if err != nil {
+			logger.Error("inspect administrator state", "event", "admin_state_check_failed", "error", err)
+			os.Exit(1)
+		}
+		if !hasAdmin {
+			logger.Warn("ADMIN_USERNAME is configured but no administrator exists yet; register the reserved username or run data-grant-admin before public exposure", "event", "admin_unclaimed")
+		}
+	}
 	svc := service.New(repo, cfg, logger)
-	moderationService := moderation.NewService(moderation.NewRepository(db), cfg.AdminUsername)
+	moderationService := moderation.NewService(moderation.NewRepository(db))
 	registry := metrics.New()
 	handler := httpapi.New(svc, moderationService, cfg, logger, registry).WithReadiness(platformhealth.NewReadiness(db))
 	server := &http.Server{
@@ -245,7 +260,21 @@ func runDataCommand(ctx context.Context, cfg config.Config, args []string) error
 		fmt.Printf("users_added=%d\nusers_renamed=%d\nsessions_added=%d\nvideos_added=%d\ncomments_added=%d\nlikes_added=%d\nfavorites_added=%d\nfollows_added=%d\nmedia_jobs_added=%d\nnotifications_added=%d\n",
 			stats.Users, stats.RenamedUsers, stats.Sessions, stats.Videos, stats.Comments, stats.Likes, stats.Favorites, stats.Follows, stats.MediaJobs, stats.Notifications)
 		return nil
+	case "data-grant-admin":
+		if len(args) != 2 {
+			return fmt.Errorf("usage: gvideo data-grant-admin <username>")
+		}
+		repo := repository.New(db)
+		user, _, err := repo.UserAuthByUsername(ctx, strings.TrimSpace(args[1]))
+		if err != nil {
+			return err
+		}
+		if err := repo.SetAdminFlag(ctx, user.ID, true); err != nil {
+			return fmt.Errorf("grant admin to %q: %w", user.Username, err)
+		}
+		fmt.Printf("admin_granted=%s\n", user.Username)
+		return nil
 	default:
-		return fmt.Errorf("unknown command %q; use data-status, data-backup, data-verify, data-verify-media, or data-merge", args[0])
+		return fmt.Errorf("unknown command %q; use data-status, data-backup, data-verify, data-verify-media, data-merge, or data-grant-admin", args[0])
 	}
 }

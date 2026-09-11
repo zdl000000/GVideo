@@ -50,10 +50,10 @@ func (s *handlerServiceStub) ReportVideo(_ context.Context, userID, videoID int6
 	s.userID, s.videoID, s.reason, s.detail = userID, videoID, reason, detail
 	return s.report, nil
 }
-func (*handlerServiceStub) AdminVideoReports(context.Context, string, string, int, int) (domain.VideoReportPage, error) {
+func (*handlerServiceStub) AdminVideoReports(context.Context, bool, string, int, int) (domain.VideoReportPage, error) {
 	return domain.VideoReportPage{}, nil
 }
-func (*handlerServiceStub) ReviewVideoReport(context.Context, string, int64, string) (domain.VideoReport, error) {
+func (*handlerServiceStub) ReviewVideoReport(context.Context, bool, int64, string) (domain.VideoReport, error) {
 	return domain.VideoReport{}, nil
 }
 

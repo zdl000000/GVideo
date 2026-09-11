@@ -32,6 +32,14 @@ var databaseMigrations = []databaseMigration{
 			return migrateBaselineV1(tx)
 		},
 	},
+	{
+		version:  2,
+		identity: "users-is-admin-flag-v2",
+		apply: func(tx *sql.Tx) error {
+			_, err := ensureColumn(tx, "users", "is_admin", "INTEGER NOT NULL DEFAULT 0")
+			return err
+		},
+	},
 }
 
 func migrate(db *sql.DB) error {

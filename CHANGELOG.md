@@ -27,5 +27,6 @@ GVideo 的重要变更记录在此。项目在首次正式发布后遵循语义�
 ### 安全
 
 - 服务端 Session、Secure Cookie 支持、CSRF、防伪造上传类型和按可见性鉴权的媒体访问。
+- 修复管理员提权漏洞：管理员身份由用户名实时比较改为 `users.is_admin` 持久标志（迁移 v2），改名到保留名、大小写变体抢占与合并丢标均被关闭；新增 `gvideo data-grant-admin` 显式授予命令、启动配置校验与未认领告警。
 
 [未发布]: https://github.com/zdl000000/GVideo/commits/main

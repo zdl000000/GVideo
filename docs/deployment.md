@@ -13,7 +13,7 @@
 | `METRICS_ADDR` | 空 | Prometheus 管理端监听地址；默认关闭，只允许绑定 loopback 或可信管理网络 |
 | `PPROF_ADDR` | 空 | Go pprof 管理端监听地址；默认关闭，不得暴露公网 |
 | `FRONTEND_URL` | `http://127.0.0.1:5173` | 前端公开入口，必须是无路径 Origin |
-| `ADMIN_USERNAME` | 空 | 指定现有用户名为管理员，大小写不敏感 |
+| `ADMIN_USERNAME` | 空 | 保留的管理员用户名，忽略大小写与首尾空白；首个注册该名称的账号获得管理员标志，此后该名称锁定。值必须符合用户名规则（3-24 位中文、字母、数字或下划线），否则启动 fail-fast |
 | `DATABASE_PATH` | `./data/gvideo.db` | SQLite 数据库路径 |
 | `MEDIA_DIR` | `./media` | 媒体文件根目录 |
 | `SESSION_TTL` | `168h` | 登录有效期 |
@@ -34,6 +34,8 @@
 | `HTTPS_PORT` | `443` | TLS 端口 |
 | `TLS_CERT_FILE` | 无 | 仓库外证书链绝对路径 |
 | `TLS_KEY_FILE` | 无 | 仓库外私钥绝对路径 |
+
+管理员升级说明：自 v2 迁移起管理员身份存储为 `users.is_admin` 持久标志，不再按用户名实时比较。升级后启动时若配置了 `ADMIN_USERNAME` 但库中还没有管理员，会记录 `admin_unclaimed` 警告——请注册该保留用户名，或使用 `gvideo data-grant-admin <username>`（见[运维文档](operations.md)）显式授予。若 `ADMIN_USERNAME` 不符合用户名规则，启动会拒绝运行，请在升级前修正配置。
 
 真实密钥、证书、数据库和媒体不能进入 Git。
 

@@ -17,11 +17,30 @@ func (s *Service) Register(ctx context.Context, username, password string) (Crea
 	if !usernamePattern.MatchString(username) || len(password) < 8 || len(password) > 72 {
 		return CreatedSession{}, domain.ErrInvalidInput
 	}
+	// The reserved administrator name is claimable only while no administrator
+	// exists yet; afterwards the name stays locked so nobody can squat a case
+	// variant of it. Legitimate administrators are granted explicitly through
+	// the data-grant-admin command instead of implicit name matching.
+	claimsAdmin := s.isReservedAdminName(username)
+	if claimsAdmin {
+		hasAdmin, err := s.repo.HasAdmin(ctx)
+		if err != nil {
+			return CreatedSession{}, err
+		}
+		if hasAdmin {
+			return CreatedSession{}, domain.ErrConflict
+		}
+	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		return CreatedSession{}, fmt.Errorf("hash password: %w", err)
 	}
-	user, err := s.repo.CreateUser(ctx, username, string(hash))
+	var user domain.User
+	if claimsAdmin {
+		user, err = s.repo.CreateAdminUser(ctx, username, string(hash))
+	} else {
+		user, err = s.repo.CreateUser(ctx, username, string(hash))
+	}
 	if err != nil {
 		return CreatedSession{}, err
 	}
@@ -54,7 +73,6 @@ func (s *Service) newSession(ctx context.Context, user domain.User) (CreatedSess
 	if err := s.repo.CreateSession(ctx, hashToken(token), user.ID, csrf, time.Now().Add(s.cfg.SessionTTL)); err != nil {
 		return CreatedSession{}, err
 	}
-	user.IsAdmin = s.IsAdmin(user.Username)
 	return CreatedSession{Token: token, CSRFToken: csrf, User: user}, nil
 }
 
@@ -66,11 +84,19 @@ func (s *Service) Authenticate(ctx context.Context, token string) (domain.Sessio
 	if err != nil {
 		return domain.Session{}, err
 	}
-	session.User.IsAdmin = s.IsAdmin(session.User.Username)
 	return session, nil
 }
 
-func (s *Service) IsAdmin(username string) bool {
+// ValidUsername reports whether the given username satisfies the registration
+// rules; it is exported so startup validation can fail fast on misconfigured
+// administrator names.
+func ValidUsername(username string) bool {
+	return usernamePattern.MatchString(strings.TrimSpace(username))
+}
+
+// isReservedAdminName reports whether the username matches the configured
+// administrator name, ignoring case and surrounding whitespace.
+func (s *Service) isReservedAdminName(username string) bool {
 	return s.cfg.AdminUsername != "" && strings.EqualFold(strings.TrimSpace(username), strings.TrimSpace(s.cfg.AdminUsername))
 }
 

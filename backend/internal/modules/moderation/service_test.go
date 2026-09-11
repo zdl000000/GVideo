@@ -19,7 +19,7 @@ func TestServiceReportRulesAndUpsert(t *testing.T) {
 	defer db.Close()
 	legacy := repository.New(db)
 	repo := NewRepository(db)
-	svc := NewService(repo, "report_admin")
+	svc := NewService(repo)
 	ctx := context.Background()
 	author, err := legacy.CreateUser(ctx, "report_author", "hash")
 	if err != nil {
@@ -54,17 +54,17 @@ func TestServiceReportRulesAndUpsert(t *testing.T) {
 
 func TestServiceAdminAuthorizationAndValidation(t *testing.T) {
 	repo := &serviceRepositoryStub{}
-	svc := NewService(repo, "Admin_User")
-	if _, err := svc.AdminVideoReports(context.Background(), "ordinary", "", 1, 20); !errors.Is(err, domain.ErrForbidden) {
+	svc := NewService(repo)
+	if _, err := svc.AdminVideoReports(context.Background(), false, "", 1, 20); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("list error = %v", err)
 	}
-	if _, err := svc.AdminVideoReports(context.Background(), " admin_user ", "invalid", 1, 20); !errors.Is(err, domain.ErrInvalidInput) {
+	if _, err := svc.AdminVideoReports(context.Background(), true, "invalid", 1, 20); !errors.Is(err, domain.ErrInvalidInput) {
 		t.Fatalf("status error = %v", err)
 	}
-	if _, err := svc.ReviewVideoReport(context.Background(), "ADMIN_USER", 0, "resolved"); !errors.Is(err, domain.ErrInvalidInput) {
+	if _, err := svc.ReviewVideoReport(context.Background(), true, 0, "resolved"); !errors.Is(err, domain.ErrInvalidInput) {
 		t.Fatalf("id error = %v", err)
 	}
-	if _, err := svc.ReviewVideoReport(context.Background(), "ADMIN_USER", 1, " resolved "); err != nil {
+	if _, err := svc.ReviewVideoReport(context.Background(), true, 1, " resolved "); err != nil {
 		t.Fatalf("review error = %v", err)
 	}
 }

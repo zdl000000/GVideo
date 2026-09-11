@@ -20,11 +20,12 @@ func TestOpenDatabaseCreatesAndReusesMigrationLedger(t *testing.T) {
 	}
 	var version int
 	var checksum string
-	if err := db.QueryRow(`SELECT version, checksum FROM schema_migrations`).Scan(&version, &checksum); err != nil {
+	if err := db.QueryRow(`SELECT version, checksum FROM schema_migrations ORDER BY version DESC LIMIT 1`).Scan(&version, &checksum); err != nil {
 		db.Close()
 		t.Fatal(err)
 	}
-	if version != 1 || checksum != migrationChecksum(databaseMigrations[0]) {
+	latest := databaseMigrations[len(databaseMigrations)-1]
+	if version != latest.version || checksum != migrationChecksum(latest) {
 		db.Close()
 		t.Fatalf("unexpected ledger row: version=%d checksum=%q", version, checksum)
 	}
@@ -38,7 +39,7 @@ func TestOpenDatabaseCreatesAndReusesMigrationLedger(t *testing.T) {
 	}
 	defer db.Close()
 	var count int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&count); err != nil || count != 1 {
+	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&count); err != nil || count != len(databaseMigrations) {
 		t.Fatalf("migration ledger is not idempotent: count=%d err=%v", count, err)
 	}
 }
@@ -419,6 +420,7 @@ func TestMergeDatabaseRemapsRelationshipsAndIsRepeatable(t *testing.T) {
 	_, err = source.Exec(`
 INSERT INTO users(id, username, password_hash, avatar_path) VALUES (7, 'source-user', 'source-hash', 'avatars/source.png');
 INSERT INTO users(id, username, password_hash) VALUES (8, 'source-followed', 'source-hash');
+UPDATE users SET is_admin = 1 WHERE id = 7;
 INSERT INTO videos(id, user_id, title, category, visibility, video_path, hls_master_path, mime_type, size_bytes, processing_status, processing_progress, processing_stage, processing_error)
 VALUES (9, 7, 'Source video', 'knowledge', 'private', 'videos/source.mp4', 'hls/9/master.m3u8', 'video/mp4', 100, 'failed', 72, 'failed', 'internal failure');
 INSERT INTO comments(id, video_id, user_id, content) VALUES (11, 9, 7, 'source comment');
@@ -461,6 +463,13 @@ WHERE v.video_path = 'videos/source.mp4'`).Scan(&mergedAvatar, &mergedVisibility
 		mergedProgress != 72 || mergedStage != "failed" {
 		t.Fatalf("merged fields: avatar=%q visibility=%q hls=%q progress=%d stage=%q",
 			mergedAvatar, mergedVisibility, mergedHLS, mergedProgress, mergedStage)
+	}
+	var mergedAdmin int
+	if err := destination.QueryRow(`SELECT is_admin FROM users WHERE username = 'source-user'`).Scan(&mergedAdmin); err != nil {
+		t.Fatal(err)
+	}
+	if mergedAdmin != 1 {
+		t.Fatalf("merged admin flag = %d, want 1", mergedAdmin)
 	}
 	second, err := MergeDatabase(ctx, destination, sourcePath)
 	if err != nil {

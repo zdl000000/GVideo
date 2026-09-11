@@ -342,7 +342,7 @@ type moderationHTTPPort struct{ handler *Handler }
 
 func (p moderationHTTPPort) Principal(ctx context.Context) moderation.Principal {
 	session := sessionFrom(ctx)
-	return moderation.Principal{UserID: session.User.ID, Username: session.User.Username}
+	return moderation.Principal{UserID: session.User.ID, Username: session.User.Username, IsAdmin: session.User.IsAdmin}
 }
 func (p moderationHTTPPort) DecodeJSON(w http.ResponseWriter, r *http.Request, target any) bool {
 	return decodeJSON(w, r, target)
