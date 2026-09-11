@@ -51,6 +51,8 @@ backend 容器设置 `stop_grace_period: 30s`，长于应用的 15 秒优雅关�
 
 限流说明：登录/注册按客户端地址限流，评论与上传按用户限流，超限返回 `429` 与 `Retry-After`（秒）。后端只信任来自 loopback/私网对端的 `X-Forwarded-For`（从右向左取最后一个公网地址）与 `X-Real-IP`，并且永不信任 `True-Client-IP`；**替换或前置新的反向代理时必须覆写 `X-Forwarded-For` 为 `$remote_addr` 并清空 `True-Client-IP`**，否则客户端可伪造转发链绕过按地址限流。同一 NAT 出口后的用户共享登录配额，容量不足时调高 `RATE_LIMIT_AUTH_PER_MINUTE` 或设为 `0` 关闭该档。被限流的大文件上传可能因请求体未读完而收到连接重置，客户端应把网络错误与 429 一并视为退避信号。
 
+边缘响应头：HTTPS 网关在边缘为自产响应（限流 `429`、`502`、`/gateway-healthz`）提供 `X-Content-Type-Options`、`X-Frame-Options`、`Referrer-Policy`、`Permissions-Policy`，并在转发时隐藏上游同头副本、由网关统一重加，保证浏览器每个头只收到一份；SPA 的 CSP 由前端源服务并原样透传（网关不注入 CSP，以免与前端白名单冲突）。替换网关时需保留该行为：自产错误页应有安全头，且不得在边缘注入与前端不同的 CSP。
+
 ## Windows 开发环境
 
 ```powershell
