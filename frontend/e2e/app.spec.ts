@@ -61,13 +61,68 @@ test("video page keeps subtitle management out of playback and comments", async 
   const videoID = await firstPublicVideoID(page);
   test.skip(!videoID, "No public video is available in the acceptance environment.");
 
-  await page.goto(`/video/${videoID}`);
+  await page.goto(`/video/${videoID}`, { waitUntil: "domcontentloaded" });
   await expect(page.locator(".watch-page")).toBeVisible({ timeout: 20_000 });
   await expect(page.locator(".player-wrap video")).toBeVisible({ timeout: 20_000 });
   await expect(page.locator(".comment-section")).toBeVisible({ timeout: 20_000 });
   await expect(page.locator(".watch-page .subtitle-manager")).toHaveCount(0);
   await expect(page.locator(".comment-section .subtitle-manager")).toHaveCount(0);
   await expectNoHorizontalOverflow(page);
+});
+
+test("video player keyboard scope and controls are accessible", async ({ page, isMobile }) => {
+  test.skip(isMobile, "Desktop keyboard model is covered by the desktop project.");
+  const videoID = await firstPublicVideoID(page);
+  test.skip(!videoID, "No public video is available in the acceptance environment.");
+
+  await page.goto(`/video/${videoID}`, { waitUntil: "domcontentloaded" });
+  const player = page.getByRole("region", { name: /视频播放器$/ });
+  const media = player.locator("video");
+  await expect(player).toBeVisible({ timeout: 20_000 });
+  await player.focus();
+  await expect(player).toBeFocused();
+  await expect(player).toHaveAttribute("aria-keyshortcuts", "Space K ArrowLeft ArrowRight J L Home End ArrowUp ArrowDown M C T F");
+
+  await media.evaluate((element) => {
+    const video = element as HTMLVideoElement;
+    video.pause();
+    let mockedTime = 30;
+    Object.defineProperties(video, {
+      duration: { configurable: true, get: () => 120 },
+      currentTime: {
+        configurable: true,
+        get: () => mockedTime,
+        set: (value: number) => { mockedTime = value; }
+      }
+    });
+  });
+  await page.keyboard.press("ArrowRight");
+  await expect.poll(() => media.evaluate((element) => (element as HTMLVideoElement).currentTime)).toBe(35);
+
+  const searchInput = page.getByRole("textbox", { name: "搜索" });
+  await searchInput.focus();
+  await expect(searchInput).toBeFocused();
+  await page.keyboard.press("ArrowRight");
+  await expect.poll(() => media.evaluate((element) => (element as HTMLVideoElement).currentTime)).toBe(35);
+
+  await player.focus();
+  await page.keyboard.press("t");
+  const layout = page.locator(".watch-layout");
+  await expect(layout).toHaveClass(/theater-mode/);
+  await expect(player).toHaveClass(/theater-mode/);
+  await expect(player.getByRole("button", { name: "宽屏模式" })).toHaveAttribute("aria-pressed", "true");
+  const [mainBox, relatedBox] = await Promise.all([
+    page.locator(".watch-main").boundingBox(),
+    page.locator(".related-panel").boundingBox()
+  ]);
+  expect(mainBox).not.toBeNull();
+  expect(relatedBox).not.toBeNull();
+  expect(relatedBox!.y).toBeGreaterThanOrEqual(mainBox!.y + mainBox!.height);
+  await expectNoHorizontalOverflow(page);
+
+  await player.getByRole("button", { name: "宽屏模式" }).click();
+  await expect(layout).not.toHaveClass(/theater-mode/);
+  await expect(player.getByRole("button", { name: "宽屏模式" })).toHaveAttribute("aria-pressed", "false");
 });
 
 test("mobile navigation opens as a bounded, keyboard-dismissible panel", async ({ page, isMobile }) => {

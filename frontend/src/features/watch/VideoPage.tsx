@@ -27,9 +27,13 @@ export function VideoPage({ user }: { user: User | null }) {
   const [reportReason, setReportReason] = useState("spam");
   const [reportDetail, setReportDetail] = useState("");
   const [reportBusy, setReportBusy] = useState(false);
+  const [theaterMode, setTheaterMode] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
+    setTheaterMode(false);
+    setVideo(null);
+    setComments([]);
     setLoading(true);
     setRelatedLoading(true);
     setError("");
@@ -173,12 +177,12 @@ export function VideoPage({ user }: { user: User | null }) {
 
   return (
     <div className="page watch-page">
-      <section className="watch-layout">
+      <section className={`watch-layout ${theaterMode ? "theater-mode" : ""}`}>
         <div className="watch-main">
           <div className="watch-title-row">
             <div><p className="eyebrow">{video.category}</p><h1>{video.title}</h1><div className="watch-meta"><span><Eye size={15} />{formatCount(video.views_count)} 播放</span><span><Clock3 size={15} />{formatDate(video.created_at)}</span>{video.processing_status === "ready" && video.source_width > 0 && <span>{video.source_width} × {video.source_height}</span>}</div></div>
           </div>
-          <VideoPlayer video={video} />
+          <VideoPlayer video={video} theaterMode={theaterMode} onTheaterModeChange={setTheaterMode} />
           {video.processing_status !== "ready" && (
             <div className={`processing-notice ${video.processing_status}`}>
               <div className="processing-notice-copy">

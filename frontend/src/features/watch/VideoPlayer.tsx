@@ -5,6 +5,16 @@ import { formatDuration } from "../../shared/lib/format";
 import { loadHLSModule } from "./hlsLoader";
 import type { SubtitleTrack, Video } from "../../types";
 
+const SHORT_SEEK_SECONDS = 5;
+const LONG_SEEK_SECONDS = 10;
+const VOLUME_STEP = 0.05;
+
+function isInteractiveKeyboardTarget(target: EventTarget | null) {
+  return target instanceof Element && Boolean(target.closest(
+    "button, a, input, textarea, select, option, [role='button'], [role='textbox'], [role='slider'], [contenteditable]:not([contenteditable='false']), [role='dialog']"
+  ));
+}
+
 export interface PlayerQuality {
   index: number;
   height: number;
@@ -40,13 +50,20 @@ export function nativeHLSQualities(video: Video): PlayerQuality[] {
   }));
 }
 
-export function VideoPlayer({ video }: { video: Video }) {
+export function VideoPlayer({ video, theaterMode, onTheaterModeChange }: { video: Video; theaterMode: boolean; onTheaterModeChange: (enabled: boolean) => void }) {
   const playerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
   const qualityControlRef = useRef<HTMLDivElement>(null);
   const speedControlRef = useRef<HTMLDivElement>(null);
   const subtitleControlRef = useRef<HTMLDivElement>(null);
+  const qualityTriggerRef = useRef<HTMLButtonElement>(null);
+  const speedTriggerRef = useRef<HTMLButtonElement>(null);
+  const subtitleTriggerRef = useRef<HTMLButtonElement>(null);
+  const settingsTriggerRef = useRef<HTMLButtonElement>(null);
+  const qualityMenuRef = useRef<HTMLDivElement>(null);
+  const speedMenuRef = useRef<HTMLDivElement>(null);
+  const subtitleMenuRef = useRef<HTMLDivElement>(null);
   const [qualities, setQualities] = useState<PlayerQuality[]>([]);
   const [selectedQuality, setSelectedQuality] = useState(-1);
   const [usingHLS, setUsingHLS] = useState(false);
@@ -54,6 +71,7 @@ export function VideoPlayer({ video }: { video: Video }) {
   const [speedMenuOpen, setSpeedMenuOpen] = useState(false);
   const [subtitleMenuOpen, setSubtitleMenuOpen] = useState(false);
   const [selectedSubtitle, setSelectedSubtitle] = useState<number | null>(null);
+  const lastSelectedSubtitleRef = useRef<number | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [playing, setPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -61,11 +79,11 @@ export function VideoPlayer({ video }: { video: Video }) {
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);
   const [playbackRate, setPlaybackRate] = useState(1);
-  const [theaterMode, setTheaterMode] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [resumeNotice, setResumeNotice] = useState<number | null>(null);
   const [streamStatus, setStreamStatus] = useState<"idle" | "preparing" | "fallback" | "failed">("idle");
   const [streamAttempt, setStreamAttempt] = useState(0);
+  const [shortcutNotice, setShortcutNotice] = useState("");
   const lastProgressSaveRef = useRef(0);
 
   const saveProgress = (element: HTMLVideoElement) => {
@@ -95,7 +113,9 @@ export function VideoPlayer({ video }: { video: Video }) {
     setQualityMenuOpen(false);
     setSpeedMenuOpen(false);
     setSubtitleMenuOpen(false);
-    setSelectedSubtitle((video.subtitle_tracks ?? []).find((track) => track.is_default)?.id ?? null);
+    const defaultSubtitle = (video.subtitle_tracks ?? []).find((track) => track.is_default)?.id ?? null;
+    setSelectedSubtitle(defaultSubtitle);
+    lastSelectedSubtitleRef.current = defaultSubtitle;
     setSettingsOpen(false);
     setResumeNotice(null);
     setPlaying(false);
@@ -256,12 +276,17 @@ export function VideoPlayer({ video }: { video: Video }) {
       if (!(target instanceof Element && target.closest(".player-settings"))) setSettingsOpen(false);
     };
     const closeFromKeyboard = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setQualityMenuOpen(false);
-        setSpeedMenuOpen(false);
-        setSubtitleMenuOpen(false);
-        setSettingsOpen(false);
-      }
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      const returnTarget = qualityMenuOpen ? qualityTriggerRef.current
+        : speedMenuOpen ? speedTriggerRef.current
+          : subtitleMenuOpen ? subtitleTriggerRef.current
+            : settingsOpen ? settingsTriggerRef.current
+              : null;
+      setQualityMenuOpen(false);
+      setSpeedMenuOpen(false);
+      setSubtitleMenuOpen(false);
+      setSettingsOpen(false);
+      window.requestAnimationFrame(() => returnTarget?.focus());
     };
     document.addEventListener("click", closeFromOutside);
     document.addEventListener("keydown", closeFromKeyboard);
@@ -271,23 +296,10 @@ export function VideoPlayer({ video }: { video: Video }) {
     };
   }, [qualityMenuOpen, speedMenuOpen, subtitleMenuOpen, settingsOpen]);
 
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      const target = event.target;
-      if (target instanceof Element && target.closest("button, a, input, textarea, select, option, [contenteditable]:not([contenteditable='false'])")) return;
-      if (event.key === " ") {
-        event.preventDefault();
-        const element = videoRef.current;
-        if (element) void (element.paused ? element.play() : element.pause());
-      }
-    };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, []);
-
   const changeQuality = (value: number) => {
     setSelectedQuality(value);
     setQualityMenuOpen(false);
+    window.requestAnimationFrame(() => qualityTriggerRef.current?.focus());
     if (hlsRef.current) {
       hlsRef.current.currentLevel = value;
       return;
@@ -313,36 +325,73 @@ export function VideoPlayer({ video }: { video: Video }) {
     : `${qualities.find((quality) => quality.index === selectedQuality)?.height || ""}p`;
   const qualityOptions = [...qualities].sort((a, b) => b.height - a.height);
   const speedOptions = [2, 1.5, 1, 0.75, 0.5];
-  const togglePlay = () => {
+  const togglePlay = async () => {
     const element = videoRef.current;
-    if (!element) return;
-    void (element.paused ? element.play() : element.pause());
+    if (!element) return false;
+    if (!element.paused) {
+      element.pause();
+      return true;
+    }
+    try {
+      await element.play();
+      return true;
+    } catch {
+      return false;
+    }
   };
   const changeSpeed = (value: number) => {
     if (!videoRef.current) return;
     videoRef.current.playbackRate = value;
     setPlaybackRate(value);
     setSpeedMenuOpen(false);
+    window.requestAnimationFrame(() => speedTriggerRef.current?.focus());
   };
   const toggleMute = () => {
-    if (!videoRef.current) return;
-    videoRef.current.muted = !videoRef.current.muted;
+    const element = videoRef.current;
+    if (!element) return;
+    if (element.muted || element.volume === 0) {
+      if (element.volume === 0) element.volume = Math.max(volume, VOLUME_STEP);
+      element.muted = false;
+    } else {
+      element.muted = true;
+    }
+    setVolume(element.volume);
+    setMuted(element.muted);
   };
   const changeVolume = (value: number) => {
-    if (!videoRef.current) return;
-    videoRef.current.volume = value;
-    videoRef.current.muted = value === 0;
+    const element = videoRef.current;
+    if (!element) return;
+    const nextVolume = Math.min(1, Math.max(0, value));
+    element.volume = nextVolume;
+    element.muted = nextVolume === 0;
+    setVolume(nextVolume);
+    setMuted(element.muted);
   };
-  const toggleFullscreen = () => {
-    if (!playerRef.current) return;
-    if (document.fullscreenElement) void document.exitFullscreen();
-    else void playerRef.current.requestFullscreen();
+  const toggleFullscreen = async (): Promise<"entered" | "exited" | "unavailable" | "failed"> => {
+    const player = playerRef.current;
+    if (!player) return "unavailable";
+    if (document.fullscreenElement === player) {
+      if (typeof document.exitFullscreen !== "function") return "unavailable";
+      try {
+        await document.exitFullscreen();
+        return "exited";
+      } catch {
+        return "failed";
+      }
+    }
+    if (document.fullscreenElement || typeof player.requestFullscreen !== "function") return "unavailable";
+    try {
+      await player.requestFullscreen();
+      return "entered";
+    } catch {
+      return "failed";
+    }
   };
   const togglePictureInPicture = () => {
     const element = videoRef.current as (HTMLVideoElement & { requestPictureInPicture?: () => Promise<unknown> }) | null;
     if (!element || !document.pictureInPictureEnabled) return;
-    if (document.pictureInPictureElement) void document.exitPictureInPicture();
-    else void element.requestPictureInPicture?.();
+    if (document.pictureInPictureElement) void document.exitPictureInPicture?.().catch(() => undefined);
+    else void element.requestPictureInPicture?.().catch(() => undefined);
   };
   const subtitleTracks: SubtitleTrack[] = video.subtitle_tracks ?? [];
   const subtitleTrackSignature = subtitleTracks.map((track) => `${track.id}:${track.is_default ? 1 : 0}:${track.url}`).join("|");
@@ -359,6 +408,18 @@ export function VideoPlayer({ video }: { video: Video }) {
       track.mode = subtitleTracks[index]?.id === selectedSubtitle ? "showing" : "disabled";
     });
   }, [selectedSubtitle, video.id, subtitleTrackSignature]);
+  const openMenu = (
+    menu: "quality" | "speed" | "subtitle",
+    menuRef: React.RefObject<HTMLDivElement | null>
+  ) => {
+    const isOpen = menu === "quality" ? qualityMenuOpen : menu === "speed" ? speedMenuOpen : subtitleMenuOpen;
+    setQualityMenuOpen(menu === "quality" && !isOpen);
+    setSpeedMenuOpen(menu === "speed" && !isOpen);
+    setSubtitleMenuOpen(menu === "subtitle" && !isOpen);
+    setSettingsOpen(false);
+    if (!isOpen) window.requestAnimationFrame(() => menuRef.current?.querySelector<HTMLButtonElement>("button")?.focus());
+  };
+
   const selectSubtitle = (trackID: number | null) => {
     const tracks = videoRef.current?.textTracks;
     if (tracks) {
@@ -366,13 +427,151 @@ export function VideoPlayer({ video }: { video: Video }) {
         track.mode = video.subtitle_tracks[index]?.id === trackID ? "showing" : "disabled";
       });
     }
+    if (trackID !== null) lastSelectedSubtitleRef.current = trackID;
     setSelectedSubtitle(trackID);
     setSubtitleMenuOpen(false);
+    window.requestAnimationFrame(() => subtitleTriggerRef.current?.focus());
+  };
+
+  const handlePlayerKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (
+      event.defaultPrevented || event.nativeEvent.isComposing || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey ||
+      isInteractiveKeyboardTarget(event.target)
+    ) return;
+
+    const closeOpenPanel = () => {
+      const returnTarget = qualityMenuOpen ? qualityTriggerRef.current
+        : speedMenuOpen ? speedTriggerRef.current
+          : subtitleMenuOpen ? subtitleTriggerRef.current
+            : settingsOpen ? settingsTriggerRef.current
+              : null;
+      if (!returnTarget) return false;
+      setQualityMenuOpen(false);
+      setSpeedMenuOpen(false);
+      setSubtitleMenuOpen(false);
+      setSettingsOpen(false);
+      window.requestAnimationFrame(() => returnTarget.focus());
+      return true;
+    };
+    if (event.key === "Escape" && closeOpenPanel()) {
+      event.preventDefault();
+      return;
+    }
+
+    const element = videoRef.current;
+    if (!element) return;
+    const seekTo = (value: number) => {
+      if (!Number.isFinite(element.duration) || element.duration <= 0) return;
+      const nextTime = Math.min(element.duration, Math.max(0, value));
+      element.currentTime = nextTime;
+      setCurrentTime(nextTime);
+      setShortcutNotice(`播放位置 ${formatDuration(nextTime)}`);
+    };
+    const seekBy = (seconds: number) => seekTo(element.currentTime + seconds);
+    const adjustVolume = (delta: number) => {
+      const nextVolume = Math.min(1, Math.max(0, element.volume + delta));
+      changeVolume(nextVolume);
+      setShortcutNotice(`音量 ${Math.round(nextVolume * 100)}%`);
+    };
+    const isToggleKey = ["Space", "KeyK", "KeyM", "KeyF", "KeyC", "KeyT"].includes(event.code);
+    if (event.repeat && isToggleKey) return;
+
+    switch (event.code) {
+      case "Space":
+      case "KeyK": {
+        event.preventDefault();
+        const willPlay = element.paused;
+        void togglePlay().then((changed) => {
+          if (changed) setShortcutNotice(willPlay ? "播放" : "暂停");
+          else if (willPlay) setShortcutNotice("无法播放");
+        });
+        break;
+      }
+      case "ArrowLeft":
+        event.preventDefault();
+        seekBy(-SHORT_SEEK_SECONDS);
+        break;
+      case "ArrowRight":
+        event.preventDefault();
+        seekBy(SHORT_SEEK_SECONDS);
+        break;
+      case "KeyJ":
+        event.preventDefault();
+        seekBy(-LONG_SEEK_SECONDS);
+        break;
+      case "KeyL":
+        event.preventDefault();
+        seekBy(LONG_SEEK_SECONDS);
+        break;
+      case "Home":
+        event.preventDefault();
+        seekTo(0);
+        break;
+      case "End":
+        event.preventDefault();
+        seekTo(element.duration);
+        break;
+      case "ArrowUp":
+        event.preventDefault();
+        adjustVolume(VOLUME_STEP);
+        break;
+      case "ArrowDown":
+        event.preventDefault();
+        adjustVolume(-VOLUME_STEP);
+        break;
+      case "KeyM": {
+        event.preventDefault();
+        const willUnmute = element.muted || element.volume === 0;
+        toggleMute();
+        setShortcutNotice(willUnmute ? "已取消静音" : "已静音");
+        break;
+      }
+      case "KeyF":
+        event.preventDefault();
+        void toggleFullscreen().then((result) => {
+          if (result === "entered") setShortcutNotice("已进入全屏");
+          else if (result === "exited") setShortcutNotice("已退出全屏");
+          else if (result === "unavailable") setShortcutNotice("当前无法切换全屏");
+          else setShortcutNotice("全屏切换失败");
+        });
+        break;
+      case "KeyT":
+        event.preventDefault();
+        onTheaterModeChange(!theaterMode);
+        setShortcutNotice(theaterMode ? "已退出宽屏模式" : "已进入宽屏模式");
+        break;
+      case "KeyC": {
+        event.preventDefault();
+        if (subtitleTracks.length === 0) {
+          setShortcutNotice("此视频暂无字幕");
+          break;
+        }
+        const rememberedSubtitle = subtitleTracks.find((track) => track.id === lastSelectedSubtitleRef.current);
+        const nextSubtitle = selectedSubtitle === null
+          ? (rememberedSubtitle ?? subtitleTracks.find((track) => track.is_default) ?? subtitleTracks[0]).id
+          : null;
+        selectSubtitle(nextSubtitle);
+        setShortcutNotice(nextSubtitle === null ? "字幕已关闭" : "字幕已开启");
+        break;
+      }
+    }
   };
 
   return (
-    <div className={`player-wrap ${theaterMode ? "theater-mode" : ""}`} ref={playerRef} aria-busy={streamStatus === "preparing"}>
-      <video ref={videoRef} poster={video.cover_url || undefined} playsInline onClick={togglePlay}>
+    <div
+      className={`player-wrap ${theaterMode ? "theater-mode" : ""}`}
+      ref={playerRef}
+      role="region"
+      tabIndex={0}
+      aria-label={`${video.title} 视频播放器`}
+      aria-keyshortcuts="Space K ArrowLeft ArrowRight J L Home End ArrowUp ArrowDown M C T F"
+      onKeyDown={handlePlayerKeyDown}
+      aria-describedby={`player-keyboard-help-${video.id}`}
+      aria-busy={streamStatus === "preparing"}
+    >
+      <p id={`player-keyboard-help-${video.id}`} className="sr-only">空格或 K 播放暂停，左右方向键快退快进 5 秒，J 或 L 快退快进 10 秒，上下方向键调节音量，M 静音，C 字幕，T 宽屏，F 全屏。</p>
+      <div className="sr-only" data-testid="player-shortcut-status" aria-live="polite" aria-atomic="true">{shortcutNotice}</div>
+      <video ref={videoRef} poster={video.cover_url || undefined} playsInline onClick={() => { playerRef.current?.focus(); togglePlay(); }}>
         {subtitleTracks.map((track) => (
         <track key={track.id} kind="subtitles" src={track.url} srcLang={track.language} label={track.label} default={track.is_default} />
         ))}
@@ -399,6 +598,7 @@ export function VideoPlayer({ video }: { video: Video }) {
             step="0.1"
             value={Math.min(currentTime, duration || 0)}
             aria-label="播放进度"
+            aria-valuetext={`${formatDuration(currentTime)} / ${formatDuration(duration)}`}
             onChange={(event) => {
               const value = Number(event.target.value);
               if (videoRef.current) videoRef.current.currentTime = value;
@@ -407,7 +607,7 @@ export function VideoPlayer({ video }: { video: Video }) {
           />
         </div>
         <div className="player-control-row">
-          <button type="button" className="player-icon-button" onClick={togglePlay} aria-label={playing ? "暂停" : "播放"} title={playing ? "暂停" : "播放"}>
+          <button type="button" className="player-icon-button" onClick={togglePlay} aria-label={playing ? "暂停" : "播放"} title={playing ? "暂停（空格或 K）" : "播放（空格或 K）"}>
             {playing ? <Pause size={17} fill="currentColor" /> : <Play size={17} fill="currentColor" />}
           </button>
           <span className="player-time">{formatDuration(currentTime)} / {formatDuration(duration)}</span>
@@ -415,12 +615,11 @@ export function VideoPlayer({ video }: { video: Video }) {
             {usingHLS && qualities.length > 0 && (
               <div className={`quality-control ${qualityMenuOpen ? "open" : ""}`} ref={qualityControlRef}>
           {qualityMenuOpen && (
-            <div className="quality-menu" id={`quality-menu-${video.id}`} role="listbox" aria-label="选择视频清晰度">
+            <div ref={qualityMenuRef} className="quality-menu" id={`quality-menu-${video.id}`} role="group" aria-label="选择视频清晰度">
               {qualityOptions.map((quality) => (
                 <button
                   type="button"
-                  role="option"
-                  aria-selected={selectedQuality === quality.index}
+                  aria-pressed={selectedQuality === quality.index}
                   className={selectedQuality === quality.index ? "active" : ""}
                   onClick={() => changeQuality(quality.index)}
                   key={quality.index}
@@ -431,8 +630,7 @@ export function VideoPlayer({ video }: { video: Video }) {
               ))}
               <button
                 type="button"
-                role="option"
-                aria-selected={selectedQuality === -1}
+                aria-pressed={selectedQuality === -1}
                 className={selectedQuality === -1 ? "active" : ""}
                 onClick={() => changeQuality(-1)}
               >
@@ -443,14 +641,14 @@ export function VideoPlayer({ video }: { video: Video }) {
           )}
           <button
             type="button"
+            ref={qualityTriggerRef}
             className="quality-trigger"
             aria-label={`选择视频清晰度，当前${selectedQualityLabel}`}
-            aria-haspopup="listbox"
             aria-expanded={qualityMenuOpen}
             aria-controls={`quality-menu-${video.id}`}
             onClick={(event) => {
               event.stopPropagation();
-              setQualityMenuOpen((open) => !open);
+              openMenu("quality", qualityMenuRef);
             }}
           >
             <span>{selectedQualityLabel}</span>
@@ -459,12 +657,12 @@ export function VideoPlayer({ video }: { video: Video }) {
               </div>
             )}
             <div className={`speed-control ${speedMenuOpen ? "open" : ""}`} ref={speedControlRef}>
-              {speedMenuOpen && <div className="speed-menu">{speedOptions.map((value) => <button type="button" className={playbackRate === value ? "active" : ""} onClick={() => changeSpeed(value)} key={value}>{value === 1 ? "正常" : `${value}x`}</button>)}</div>}
-              <button type="button" className="player-text-button" onClick={(event) => { event.stopPropagation(); setSpeedMenuOpen((open) => !open); setQualityMenuOpen(false); setSettingsOpen(false); }} aria-label="播放速度" title="播放速度">{playbackRate === 1 ? "倍速" : `${playbackRate}x`}</button>
+              {speedMenuOpen && <div ref={speedMenuRef} className="speed-menu" id={`speed-menu-${video.id}`} role="group" aria-label="选择播放速度">{speedOptions.map((value) => <button type="button" aria-pressed={playbackRate === value} className={playbackRate === value ? "active" : ""} onClick={() => changeSpeed(value)} key={value}>{value === 1 ? "正常" : `${value}x`}</button>)}</div>}
+              <button type="button" ref={speedTriggerRef} className="player-text-button" onClick={(event) => { event.stopPropagation(); openMenu("speed", speedMenuRef); }} aria-label="播放速度" aria-expanded={speedMenuOpen} aria-controls={`speed-menu-${video.id}`} title="播放速度">{playbackRate === 1 ? "倍速" : `${playbackRate}x`}</button>
             </div>
             <div className={`subtitle-control-wrap ${subtitleMenuOpen ? "open" : ""}`} ref={subtitleControlRef}>
               {subtitleMenuOpen && (
-                <div className="subtitle-menu" role="menu" aria-label="字幕轨道">
+                <div ref={subtitleMenuRef} className="subtitle-menu" id={`subtitle-menu-${video.id}`} role="group" aria-label="字幕轨道">
                   {subtitleTracks.length === 0 ? (
                     <div className="subtitle-empty" role="status">
                       <strong>暂无字幕</strong>
@@ -472,9 +670,9 @@ export function VideoPlayer({ video }: { video: Video }) {
                     </div>
                   ) : (
                     <>
-                      <button type="button" className={selectedSubtitle === null ? "active" : ""} onClick={() => selectSubtitle(null)}>关闭</button>
+                      <button type="button" aria-pressed={selectedSubtitle === null} className={selectedSubtitle === null ? "active" : ""} onClick={() => selectSubtitle(null)}>关闭</button>
                       {subtitleTracks.map((track) => (
-                        <button type="button" className={selectedSubtitle === track.id ? "active" : ""} onClick={() => selectSubtitle(track.id)} key={track.id}>{track.label}</button>
+                        <button type="button" aria-pressed={selectedSubtitle === track.id} className={selectedSubtitle === track.id ? "active" : ""} onClick={() => selectSubtitle(track.id)} key={track.id}>{track.label}</button>
                       ))}
                     </>
                   )}
@@ -482,31 +680,31 @@ export function VideoPlayer({ video }: { video: Video }) {
               )}
               <button
                 type="button"
+                ref={subtitleTriggerRef}
                 className="player-text-button subtitle-control"
                 title={subtitleTracks.length === 0 ? "查看字幕状态" : "选择字幕"}
                 aria-label={subtitleTracks.length === 0 ? "查看字幕状态" : "选择字幕"}
-                aria-haspopup="menu"
                 aria-expanded={subtitleMenuOpen}
+                aria-controls={`subtitle-menu-${video.id}`}
+                aria-pressed={selectedSubtitle !== null}
+
                 onClick={(event) => {
                   event.stopPropagation();
-                  setSubtitleMenuOpen((open) => !open);
-                  setQualityMenuOpen(false);
-                  setSpeedMenuOpen(false);
-                  setSettingsOpen(false);
+                  openMenu("subtitle", subtitleMenuRef);
                 }}
               >字幕</button>
             </div>
             <div className="volume-control">
-              <button type="button" className="player-icon-button" onClick={toggleMute} aria-label={muted || volume === 0 ? "取消静音" : "静音"} title={muted || volume === 0 ? "取消静音" : "静音"}>{muted || volume === 0 ? <VolumeX size={18} /> : <Volume2 size={18} />}</button>
+              <button type="button" className="player-icon-button" onClick={toggleMute} aria-label={muted || volume === 0 ? "取消静音" : "静音"} title={muted || volume === 0 ? "取消静音（M）" : "静音（M）"}>{muted || volume === 0 ? <VolumeX size={18} /> : <Volume2 size={18} />}</button>
               <input type="range" min="0" max="1" step="0.01" value={muted ? 0 : volume} aria-label="音量" onChange={(event) => changeVolume(Number(event.target.value))} />
             </div>
             <div className="player-settings">
-              {settingsOpen && <div className="settings-menu"><strong>播放设置</strong><span>画质 <b>{selectedQualityLabel}</b></span><span>倍速 <b>{playbackRate}x</b></span></div>}
-              <button type="button" className="player-icon-button" onClick={(event) => { event.stopPropagation(); setSettingsOpen((open) => !open); setQualityMenuOpen(false); setSpeedMenuOpen(false); }} aria-label="播放设置" title="播放设置"><Settings2 size={18} /></button>
+              {settingsOpen && <div className="settings-menu" id={`settings-panel-${video.id}`}><strong>播放设置</strong><span>画质 <b>{selectedQualityLabel}</b></span><span>倍速 <b>{playbackRate}x</b></span></div>}
+              <button type="button" ref={settingsTriggerRef} className="player-icon-button" onClick={(event) => { event.stopPropagation(); setSettingsOpen((open) => !open); setQualityMenuOpen(false); setSpeedMenuOpen(false); setSubtitleMenuOpen(false); }} aria-label="播放设置" aria-expanded={settingsOpen} aria-controls={`settings-panel-${video.id}`} title="播放设置"><Settings2 size={18} /></button>
             </div>
-            <button type="button" className="player-icon-button theater-control" onClick={() => setTheaterMode((mode) => !mode)} aria-label={theaterMode ? "退出宽屏" : "宽屏模式"} title={theaterMode ? "退出宽屏" : "宽屏模式"}><RectangleHorizontal size={18} /></button>
+            <button type="button" className="player-icon-button theater-control" onClick={() => onTheaterModeChange(!theaterMode)} aria-label="宽屏模式" aria-pressed={theaterMode} title={theaterMode ? "退出宽屏（T）" : "宽屏模式（T）"}><RectangleHorizontal size={18} /></button>
             <button type="button" className="player-icon-button" onClick={togglePictureInPicture} disabled={!document.pictureInPictureEnabled} aria-label="画中画" title="画中画"><PictureInPicture2 size={18} /></button>
-            <button type="button" className="player-icon-button" onClick={toggleFullscreen} aria-label={fullscreen ? "退出全屏" : "全屏"} title={fullscreen ? "退出全屏" : "全屏"}>{fullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}</button>
+            <button type="button" className="player-icon-button" onClick={() => { void toggleFullscreen(); }} disabled={typeof playerRef.current?.requestFullscreen !== "function" && !fullscreen} aria-label={fullscreen ? "退出全屏" : "全屏"} title={fullscreen ? "退出全屏（F）" : "全屏（F）"}>{fullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}</button>
           </div>
         </div>
       </div>
