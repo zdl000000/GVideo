@@ -14,6 +14,7 @@ import (
 type Principal struct {
 	UserID   int64
 	Username string
+	IsAdmin  bool
 }
 
 // HTTPPort keeps protocol envelopes, request IDs, decoding, and error mapping
@@ -29,8 +30,8 @@ type HTTPPort interface {
 
 type reportService interface {
 	ReportVideo(context.Context, int64, int64, string, string) (domain.VideoReport, error)
-	AdminVideoReports(context.Context, string, string, int, int) (domain.VideoReportPage, error)
-	ReviewVideoReport(context.Context, string, int64, string) (domain.VideoReport, error)
+	AdminVideoReports(context.Context, bool, string, int, int) (domain.VideoReportPage, error)
+	ReviewVideoReport(context.Context, bool, int64, string) (domain.VideoReport, error)
 }
 
 // Handler implements the report HTTP endpoints through an injected protocol port.
@@ -67,7 +68,7 @@ func (h *Handler) ReportVideo(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) AdminReports(w http.ResponseWriter, r *http.Request) {
 	page, pageSize := h.http.Pagination(r, 20)
 	principal := h.http.Principal(r.Context())
-	result, err := h.service.AdminVideoReports(r.Context(), principal.Username, r.URL.Query().Get("status"), page, pageSize)
+	result, err := h.service.AdminVideoReports(r.Context(), principal.IsAdmin, r.URL.Query().Get("status"), page, pageSize)
 	if err != nil {
 		h.http.WriteError(w, r, err)
 		return
@@ -88,7 +89,7 @@ func (h *Handler) ReviewReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	principal := h.http.Principal(r.Context())
-	report, err := h.service.ReviewVideoReport(r.Context(), principal.Username, reportID, input.Status)
+	report, err := h.service.ReviewVideoReport(r.Context(), principal.IsAdmin, reportID, input.Status)
 	if err != nil {
 		h.http.WriteError(w, r, err)
 		return

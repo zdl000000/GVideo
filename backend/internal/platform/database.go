@@ -674,6 +674,23 @@ JOIN users u ON u.username = su.username || '-local-' || su.id
 WHERE NOT EXISTS (SELECT 1 FROM merge_user_map m WHERE m.source_id = su.id);`, sourceAvatarExpression, sourceAvatarExpression)); err != nil {
 		return MergeStats{}, fmt.Errorf("map merge users: %w", err)
 	}
+	sourceHasAdmin, err := databaseColumnExists(ctx, tx, "source_db", "users", "is_admin")
+	if err != nil {
+		return MergeStats{}, fmt.Errorf("inspect source admin column: %w", err)
+	}
+	if sourceHasAdmin {
+		// Carry administrator grants over from the merged source so a merge
+		// cannot silently drop the only administrator.
+		if _, err := tx.ExecContext(ctx, `
+UPDATE users SET is_admin = 1
+WHERE is_admin = 0 AND id IN (
+  SELECT m.target_id FROM merge_user_map m
+  JOIN source_db.users su ON su.id = m.source_id
+  WHERE su.is_admin = 1
+)`); err != nil {
+			return MergeStats{}, fmt.Errorf("merge admin flags: %w", err)
+		}
+	}
 	sourceHasHLS, err := databaseColumnExists(ctx, tx, "source_db", "videos", "hls_master_path")
 	if err != nil {
 		return MergeStats{}, fmt.Errorf("inspect source video columns: %w", err)

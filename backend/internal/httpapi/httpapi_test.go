@@ -40,7 +40,7 @@ func TestRootEndpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	handler := New(service.New(repository.New(db), cfg, logger), moderation.NewService(moderation.NewRepository(db), cfg.AdminUsername), cfg, logger).Routes()
+	handler := New(service.New(repository.New(db), cfg, logger), moderation.NewService(moderation.NewRepository(db)), cfg, logger).Routes()
 
 	result := httptest.NewRecorder()
 	handler.ServeHTTP(result, httptest.NewRequest(http.MethodGet, "/", nil))
@@ -75,7 +75,7 @@ func TestResponseHeadersAndStrictJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	handler := New(service.New(repository.New(db), cfg, logger), moderation.NewService(moderation.NewRepository(db), cfg.AdminUsername), cfg, logger).Routes()
+	handler := New(service.New(repository.New(db), cfg, logger), moderation.NewService(moderation.NewRepository(db)), cfg, logger).Routes()
 
 	categories := httptest.NewRecorder()
 	handler.ServeHTTP(categories, httptest.NewRequest(http.MethodGet, "/api/v1/categories", nil))
@@ -119,7 +119,7 @@ func TestCoreVideoFlow(t *testing.T) {
 		FFprobePath:    "missing-ffprobe-for-test",
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	handler := New(service.New(repository.New(db), cfg, logger), moderation.NewService(moderation.NewRepository(db), cfg.AdminUsername), cfg, logger).Routes()
+	handler := New(service.New(repository.New(db), cfg, logger), moderation.NewService(moderation.NewRepository(db)), cfg, logger).Routes()
 
 	registerBody := strings.NewReader(`{"username":"api_user","password":"password123"}`)
 	register := httptest.NewRequest(http.MethodPost, "/api/v1/auth/register", registerBody)
@@ -358,7 +358,7 @@ func TestCreatorSpaceAndFollowingHTTPFlow(t *testing.T) {
 	cfg := config.Config{MediaDir: filepath.Join(dir, "media"), SessionTTL: time.Hour}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	repo := repository.New(db)
-	handler := New(service.New(repo, cfg, logger), moderation.NewService(moderation.NewRepository(db), cfg.AdminUsername), cfg, logger).Routes()
+	handler := New(service.New(repo, cfg, logger), moderation.NewService(moderation.NewRepository(db)), cfg, logger).Routes()
 
 	viewer := registerTestUser(t, handler, "following_viewer")
 	author := registerTestUser(t, handler, "following_author")
@@ -498,7 +498,7 @@ func TestSubtitleManagementHTTPAuthorizationAndResponses(t *testing.T) {
 	cfg := config.Config{MediaDir: filepath.Join(dir, "media"), SessionTTL: time.Hour}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	repo := repository.New(db)
-	handler := New(service.New(repo, cfg, logger), moderation.NewService(moderation.NewRepository(db), cfg.AdminUsername), cfg, logger).Routes()
+	handler := New(service.New(repo, cfg, logger), moderation.NewService(moderation.NewRepository(db)), cfg, logger).Routes()
 	owner := registerTestUser(t, handler, "subtitle_http_owner")
 	other := registerTestUser(t, handler, "subtitle_http_other")
 	ctx := context.Background()
@@ -603,7 +603,7 @@ func TestProfileVisibilityCommentsAndPrivateMediaHTTP(t *testing.T) {
 	cfg := config.Config{MediaDir: mediaDir, SessionTTL: time.Hour, MaxUploadBytes: 10 << 20}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	repo := repository.New(db)
-	handler := New(service.New(repo, cfg, logger), moderation.NewService(moderation.NewRepository(db), cfg.AdminUsername), cfg, logger).Routes()
+	handler := New(service.New(repo, cfg, logger), moderation.NewService(moderation.NewRepository(db)), cfg, logger).Routes()
 	ctx := context.Background()
 
 	owner := registerTestUser(t, handler, "http_profile_owner")
@@ -888,7 +888,7 @@ func TestDeleteCommentHTTPAuthorization(t *testing.T) {
 	repo := repository.New(db)
 	cfg := config.Config{MediaDir: filepath.Join(dir, "media"), SessionTTL: time.Hour}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	handler := New(service.New(repo, cfg, logger), moderation.NewService(moderation.NewRepository(db), cfg.AdminUsername), cfg, logger).Routes()
+	handler := New(service.New(repo, cfg, logger), moderation.NewService(moderation.NewRepository(db)), cfg, logger).Routes()
 	owner := registerTestUser(t, handler, "delete_comment_owner")
 	author := registerTestUser(t, handler, "delete_comment_author")
 	other := registerTestUser(t, handler, "delete_comment_other")
@@ -934,7 +934,7 @@ func TestAdminReportEndpoints(t *testing.T) {
 	repo := repository.New(db)
 	cfg := config.Config{AdminUsername: "http_report_admin", MediaDir: filepath.Join(dir, "media"), SessionTTL: time.Hour}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	handler := New(service.New(repo, cfg, logger), moderation.NewService(moderation.NewRepository(db), cfg.AdminUsername), cfg, logger).Routes()
+	handler := New(service.New(repo, cfg, logger), moderation.NewService(moderation.NewRepository(db)), cfg, logger).Routes()
 	admin := registerTestUser(t, handler, "http_report_admin")
 	author := registerTestUser(t, handler, "http_report_author")
 	reporter := registerTestUser(t, handler, "http_report_viewer")
@@ -982,7 +982,7 @@ func TestFavoriteVideosEndpoint(t *testing.T) {
 	repo := repository.New(db)
 	cfg := config.Config{MediaDir: filepath.Join(dir, "media"), SessionTTL: time.Hour}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	handler := New(service.New(repo, cfg, logger), moderation.NewService(moderation.NewRepository(db), cfg.AdminUsername), cfg, logger).Routes()
+	handler := New(service.New(repo, cfg, logger), moderation.NewService(moderation.NewRepository(db)), cfg, logger).Routes()
 	auth := registerTestUser(t, handler, "favorite_endpoint_user")
 	video, err := repo.CreateVideo(context.Background(), domain.NewVideo{UserID: auth.User.ID, Title: "Favorite endpoint", Category: "knowledge", VideoPath: "videos/favorite-endpoint.mp4", MimeType: "video/mp4", SizeBytes: 10})
 	if err != nil {
@@ -1009,7 +1009,7 @@ func TestNotificationEndpointsAuthenticationCSRFAndOwnership(t *testing.T) {
 	repo := repository.New(db)
 	cfg := config.Config{MediaDir: filepath.Join(dir, "media"), SessionTTL: time.Hour}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	handler := New(service.New(repo, cfg, logger), moderation.NewService(moderation.NewRepository(db), cfg.AdminUsername), cfg, logger).Routes()
+	handler := New(service.New(repo, cfg, logger), moderation.NewService(moderation.NewRepository(db)), cfg, logger).Routes()
 	recipient := registerTestUser(t, handler, "notify_recipient")
 	actor := registerTestUser(t, handler, "notify_actor")
 	other := registerTestUser(t, handler, "notify_other")

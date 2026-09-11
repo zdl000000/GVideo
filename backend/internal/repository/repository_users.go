@@ -26,8 +26,8 @@ func (r *Repository) UserAuthByUsername(ctx context.Context, username string) (d
 	var user domain.User
 	var avatarPath string
 	var passwordHash string
-	err := r.db.QueryRowContext(ctx, `SELECT id, username, bio, avatar_path, created_at, password_hash FROM users WHERE username = ?`, username).
-		Scan(&user.ID, &user.Username, &user.Bio, &avatarPath, &user.CreatedAt, &passwordHash)
+	err := r.db.QueryRowContext(ctx, `SELECT id, username, bio, avatar_path, created_at, password_hash, is_admin FROM users WHERE username = ?`, username).
+		Scan(&user.ID, &user.Username, &user.Bio, &avatarPath, &user.CreatedAt, &passwordHash, &user.IsAdmin)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.User{}, "", domain.ErrNotFound
 	}
@@ -42,8 +42,8 @@ func (r *Repository) UserAuthByID(ctx context.Context, id int64) (domain.User, s
 	var user domain.User
 	var avatarPath string
 	var passwordHash string
-	err := r.db.QueryRowContext(ctx, `SELECT id, username, bio, avatar_path, created_at, password_hash FROM users WHERE id = ?`, id).
-		Scan(&user.ID, &user.Username, &user.Bio, &avatarPath, &user.CreatedAt, &passwordHash)
+	err := r.db.QueryRowContext(ctx, `SELECT id, username, bio, avatar_path, created_at, password_hash, is_admin FROM users WHERE id = ?`, id).
+		Scan(&user.ID, &user.Username, &user.Bio, &avatarPath, &user.CreatedAt, &passwordHash, &user.IsAdmin)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.User{}, "", domain.ErrNotFound
 	}
@@ -57,8 +57,8 @@ func (r *Repository) UserAuthByID(ctx context.Context, id int64) (domain.User, s
 func (r *Repository) UserByID(ctx context.Context, id int64) (domain.User, error) {
 	var user domain.User
 	var avatarPath string
-	err := r.db.QueryRowContext(ctx, `SELECT id, username, bio, avatar_path, created_at FROM users WHERE id = ?`, id).
-		Scan(&user.ID, &user.Username, &user.Bio, &avatarPath, &user.CreatedAt)
+	err := r.db.QueryRowContext(ctx, `SELECT id, username, bio, avatar_path, created_at, is_admin FROM users WHERE id = ?`, id).
+		Scan(&user.ID, &user.Username, &user.Bio, &avatarPath, &user.CreatedAt, &user.IsAdmin)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.User{}, domain.ErrNotFound
 	}
@@ -67,6 +67,53 @@ func (r *Repository) UserByID(ctx context.Context, id int64) (domain.User, error
 	}
 	user.AvatarURL = optionalMediaURL(avatarPath)
 	return user, nil
+}
+
+// CreateAdminUser creates the first administrator atomically: the insert only
+// succeeds while no administrator exists, so concurrent registrations cannot
+// both claim the reserved name.
+func (r *Repository) CreateAdminUser(ctx context.Context, username, passwordHash string) (domain.User, error) {
+	result, err := r.db.ExecContext(ctx, `
+INSERT INTO users(username, password_hash, is_admin)
+SELECT ?, ?, 1
+WHERE NOT EXISTS (SELECT 1 FROM users WHERE is_admin = 1)`, username, passwordHash)
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "unique") {
+			return domain.User{}, domain.ErrConflict
+		}
+		return domain.User{}, fmt.Errorf("create admin user: %w", err)
+	}
+	changed, _ := result.RowsAffected()
+	if changed != 1 {
+		return domain.User{}, domain.ErrConflict
+	}
+	id, _ := result.LastInsertId()
+	return r.UserByID(ctx, id)
+}
+
+// HasAdmin reports whether any administrator exists.
+func (r *Repository) HasAdmin(ctx context.Context) (bool, error) {
+	var exists int
+	if err := r.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE is_admin = 1)`).Scan(&exists); err != nil {
+		return false, fmt.Errorf("check admin existence: %w", err)
+	}
+	return exists == 1, nil
+}
+
+// SetAdminFlag updates the administrator flag for one user.
+func (r *Repository) SetAdminFlag(ctx context.Context, userID int64, isAdmin bool) error {
+	value := 0
+	if isAdmin {
+		value = 1
+	}
+	result, err := r.db.ExecContext(ctx, `UPDATE users SET is_admin = ? WHERE id = ?`, value, userID)
+	if err != nil {
+		return fmt.Errorf("set admin flag: %w", err)
+	}
+	if changed, _ := result.RowsAffected(); changed != 1 {
+		return domain.ErrNotFound
+	}
+	return nil
 }
 
 func (r *Repository) UpdateProfile(ctx context.Context, userID int64, username, bio string, avatarPath *string) (domain.User, error) {

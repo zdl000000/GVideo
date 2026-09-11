@@ -43,7 +43,7 @@ func TestMigrationFixturesEmptyDatabase(t *testing.T) {
 		}
 	}
 
-	assertMigrationLedger(t, db, []ledgerEntry{{version: 1, checksum: migrationChecksum(databaseMigrations[0])}})
+	assertMigrationLedger(t, db, []ledgerEntry{{version: 1, checksum: migrationChecksum(databaseMigrations[0])}, {version: 2, checksum: migrationChecksum(databaseMigrations[1])}})
 	if _, err := db.Exec(`INSERT INTO users(id, username, password_hash) VALUES (7, 'empty-fixture', 'hash')`); err != nil {
 		db.Close()
 		t.Fatalf("write to migrated schema: %v", err)
@@ -57,7 +57,7 @@ func TestMigrationFixturesEmptyDatabase(t *testing.T) {
 		t.Fatalf("reopen empty fixture: %v", err)
 	}
 	defer db.Close()
-	assertMigrationLedger(t, db, []ledgerEntry{{version: 1, checksum: migrationChecksum(databaseMigrations[0])}})
+	assertMigrationLedger(t, db, []ledgerEntry{{version: 1, checksum: migrationChecksum(databaseMigrations[0])}, {version: 2, checksum: migrationChecksum(databaseMigrations[1])}})
 	var username string
 	if err := db.QueryRow(`SELECT username FROM users WHERE id = 7`).Scan(&username); err != nil {
 		t.Fatalf("read data after reopen: %v", err)
@@ -101,7 +101,7 @@ func TestMigrationFixturesLegacyDatabase(t *testing.T) {
 	}
 
 	wantColumns := map[string][]string{
-		"users": {"avatar_path"},
+		"users": {"avatar_path", "is_admin"},
 		"videos": {
 			"processing_status", "processing_progress", "processing_stage", "visibility",
 			"hls_master_path", "source_width", "source_height", "source_bitrate",
@@ -148,7 +148,7 @@ FROM videos WHERE id = ?`, id).Scan(&title, &pathValue, &size, &status, &progres
 				id, title, pathValue, size, status, progress, stage, visibility)
 		}
 	}
-	assertMigrationLedger(t, upgraded, []ledgerEntry{{version: 1, checksum: migrationChecksum(databaseMigrations[0])}})
+	assertMigrationLedger(t, upgraded, []ledgerEntry{{version: 1, checksum: migrationChecksum(databaseMigrations[0])}, {version: 2, checksum: migrationChecksum(databaseMigrations[1])}})
 	if _, err := upgraded.Exec(`UPDATE videos SET processing_progress = 72, processing_stage = 'finalizing' WHERE id = 104`); err != nil {
 		upgraded.Close()
 		t.Fatal(err)
@@ -170,7 +170,7 @@ FROM videos WHERE id = ?`, id).Scan(&title, &pathValue, &size, &status, &progres
 	if progress != 72 || stage != "finalizing" {
 		t.Fatalf("reopen repeated backfill: progress=%d stage=%q", progress, stage)
 	}
-	assertMigrationLedger(t, upgraded, []ledgerEntry{{version: 1, checksum: migrationChecksum(databaseMigrations[0])}})
+	assertMigrationLedger(t, upgraded, []ledgerEntry{{version: 1, checksum: migrationChecksum(databaseMigrations[0])}, {version: 2, checksum: migrationChecksum(databaseMigrations[1])}})
 }
 
 func TestMigrationFixturesFailureRollsBackNextVersion(t *testing.T) {
@@ -288,6 +288,7 @@ func TestMigrationFixturesRejectsUnknownVersionWithoutChanges(t *testing.T) {
 	}
 	assertMigrationLedger(t, raw, []ledgerEntry{
 		{version: 1, checksum: migrationChecksum(databaseMigrations[0])},
+		{version: 2, checksum: migrationChecksum(databaseMigrations[1])},
 		{version: 999, checksum: "future-checksum"},
 	})
 	var username string
@@ -361,7 +362,7 @@ ORDER BY type, name`)
 	}
 	for _, query := range []string{
 		`SELECT printf('%d|%s|%s', version, checksum, applied_at) FROM schema_migrations ORDER BY version`,
-		`SELECT printf('%d|%s|%s|%s|%s', id, username, password_hash, bio, avatar_path) FROM users ORDER BY id`,
+		`SELECT printf('%d|%s|%s|%s|%s|%d', id, username, password_hash, bio, avatar_path, is_admin) FROM users ORDER BY id`,
 	} {
 		dataRows, err := db.Query(query)
 		if err != nil {

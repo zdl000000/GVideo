@@ -27,6 +27,12 @@ func (s *Service) UpdateProfile(ctx context.Context, input UpdateProfileInput) (
 	if err != nil {
 		return domain.User{}, err
 	}
+	// Renaming to the reserved administrator name would silently claim the
+	// administrator identity, so it is rejected; keeping the current name is
+	// still fine for profile-only edits.
+	if s.isReservedAdminName(input.Username) && !strings.EqualFold(strings.TrimSpace(current.Username), input.Username) {
+		return domain.User{}, domain.ErrForbidden
+	}
 
 	var avatarPath *string
 	var savedPath string

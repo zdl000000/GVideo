@@ -16,12 +16,11 @@ type reportRepository interface {
 
 // Service owns report validation and moderation authorization.
 type Service struct {
-	repo          reportRepository
-	adminUsername string
+	repo reportRepository
 }
 
-func NewService(repo reportRepository, adminUsername string) *Service {
-	return &Service{repo: repo, adminUsername: adminUsername}
+func NewService(repo reportRepository) *Service {
+	return &Service{repo: repo}
 }
 
 func (s *Service) ReportVideo(ctx context.Context, userID, videoID int64, reason, detail string) (domain.VideoReport, error) {
@@ -40,8 +39,8 @@ func (s *Service) ReportVideo(ctx context.Context, userID, videoID int64, reason
 	return s.repo.UpsertVideoReport(ctx, videoID, userID, reason, detail)
 }
 
-func (s *Service) AdminVideoReports(ctx context.Context, username, status string, page, pageSize int) (domain.VideoReportPage, error) {
-	if !s.isAdmin(username) {
+func (s *Service) AdminVideoReports(ctx context.Context, isAdmin bool, status string, page, pageSize int) (domain.VideoReportPage, error) {
+	if !isAdmin {
 		return domain.VideoReportPage{}, domain.ErrForbidden
 	}
 	status = strings.TrimSpace(status)
@@ -51,8 +50,8 @@ func (s *Service) AdminVideoReports(ctx context.Context, username, status string
 	return s.repo.ListVideoReports(ctx, status, page, pageSize)
 }
 
-func (s *Service) ReviewVideoReport(ctx context.Context, username string, reportID int64, status string) (domain.VideoReport, error) {
-	if !s.isAdmin(username) {
+func (s *Service) ReviewVideoReport(ctx context.Context, isAdmin bool, reportID int64, status string) (domain.VideoReport, error) {
+	if !isAdmin {
 		return domain.VideoReport{}, domain.ErrForbidden
 	}
 	status = strings.TrimSpace(status)
@@ -60,10 +59,6 @@ func (s *Service) ReviewVideoReport(ctx context.Context, username string, report
 		return domain.VideoReport{}, domain.ErrInvalidInput
 	}
 	return s.repo.UpdateVideoReportStatus(ctx, reportID, status)
-}
-
-func (s *Service) isAdmin(username string) bool {
-	return s.adminUsername != "" && strings.EqualFold(strings.TrimSpace(username), strings.TrimSpace(s.adminUsername))
 }
 
 func validReportReason(reason string) bool {
