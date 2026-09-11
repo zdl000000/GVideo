@@ -77,7 +77,7 @@ func (s *Service) newSession(ctx context.Context, user domain.User) (CreatedSess
 }
 
 func (s *Service) Authenticate(ctx context.Context, token string) (domain.Session, error) {
-	if token == "" {
+	if !validSessionToken(token) {
 		return domain.Session{}, domain.ErrInvalidSession
 	}
 	session, err := s.repo.SessionByHash(ctx, hashToken(token))
@@ -85,6 +85,23 @@ func (s *Service) Authenticate(ctx context.Context, token string) (domain.Sessio
 		return domain.Session{}, err
 	}
 	return session, nil
+}
+
+// validSessionToken reports whether the value has the shape of an issued
+// session token (32 random bytes as lowercase hex). Malformed cookies are
+// rejected before touching the database so garbage values cannot force
+// lookups.
+func validSessionToken(token string) bool {
+	if len(token) != 64 {
+		return false
+	}
+	for i := 0; i < len(token); i++ {
+		c := token[i]
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // ValidUsername reports whether the given username satisfies the registration

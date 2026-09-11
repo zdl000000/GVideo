@@ -25,6 +25,9 @@ services:
       HLS_ENABLED: "true"
       HLS_TRANSCODE_TIMEOUT: 30m
       HLS_SEGMENT_SECONDS: 4
+      RATE_LIMIT_AUTH_PER_MINUTE: ${RATE_LIMIT_AUTH_PER_MINUTE:-}
+      RATE_LIMIT_COMMENT_PER_MINUTE: ${RATE_LIMIT_COMMENT_PER_MINUTE:-}
+      RATE_LIMIT_UPLOAD_PER_MINUTE: ${RATE_LIMIT_UPLOAD_PER_MINUTE:-}
     volumes:
       - gvideo-data:/app/data
       - gvideo-media:/app/media

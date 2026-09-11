@@ -57,6 +57,7 @@
 | `video_processing` | 409 | 视频正在处理，当前操作不可执行 |
 | `retry_unavailable` | 409 | 当前转码状态不允许重试 |
 | `report_exists` | 409 | 当前用户已提交同一举报 |
+| `rate_limited` | 429 | 调用方超过速率限制；响应携带 `Retry-After` 秒数 |
 | `internal_error` | 500 | 未分类服务端错误；消息必须保持泛化 |
 
 规则：

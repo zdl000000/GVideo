@@ -41,6 +41,7 @@ type Handler struct {
 	cfg        config.Config
 	logger     *slog.Logger
 	metrics    *metrics.Registry
+	limiters   map[string]*tokenBucketLimiter
 }
 
 type response struct {
@@ -58,6 +59,11 @@ func New(service *service.Service, moderationService *moderation.Service, cfg co
 		registry = metrics.New()
 	}
 	h := &Handler{service: service, cfg: cfg, logger: logger, metrics: registry}
+	h.limiters = map[string]*tokenBucketLimiter{
+		"auth":    newTokenBucketLimiter(cfg.RateLimitAuthPerMinute),
+		"comment": newTokenBucketLimiter(cfg.RateLimitCommentPerMinute),
+		"upload":  newTokenBucketLimiter(cfg.RateLimitUploadPerMinute),
+	}
 	h.moderation = moderation.NewHandler(moderationService, moderationHTTPPort{handler: h})
 	return h
 }
@@ -76,7 +82,7 @@ func (h *Handler) Routes() http.Handler {
 	router.Use(h.requestID)
 	router.Use(h.accessLog)
 	router.Use(h.recoverer)
-	router.Use(middleware.RealIP)
+	router.Use(h.clientAddress)
 	router.Use(middleware.Compress(5))
 	router.Use(h.responseHeaders)
 	router.Use(h.optionalSession)
@@ -89,8 +95,8 @@ func (h *Handler) Routes() http.Handler {
 	router.Get("/media/*", h.media)
 	router.Route("/api/v1", func(api chi.Router) {
 		api.Get("/categories", h.categories)
-		api.Post("/auth/register", h.register)
-		api.Post("/auth/login", h.login)
+		api.With(h.rateLimit("auth", rateLimitClientIP)).Post("/auth/register", h.register)
+		api.With(h.rateLimit("auth", rateLimitClientIP)).Post("/auth/login", h.login)
 		api.With(h.requireAuth, h.requireCSRF).Post("/auth/logout", h.logout)
 		api.With(h.requireAuth).Get("/auth/me", h.me)
 		api.With(h.requireAuth, h.requireCSRF).Patch("/me/profile", h.updateProfile)
@@ -105,17 +111,17 @@ func (h *Handler) Routes() http.Handler {
 		api.Get("/videos", h.listVideos)
 		api.Get("/videos/{videoID}", h.getVideo)
 		api.Get("/videos/{videoID}/comments", h.listComments)
-		api.With(h.requireAuth, h.requireCSRF).Post("/videos", h.uploadVideo)
+		api.With(h.requireAuth, h.requireCSRF, h.rateLimit("upload", rateLimitUser)).Post("/videos", h.uploadVideo)
 		api.With(h.requireAuth, h.requireCSRF).Patch("/videos/{videoID}", h.updateVideo)
 		api.With(h.requireAuth, h.requireCSRF).Delete("/videos/{videoID}", h.deleteVideo)
 		api.With(h.requireAuth, h.requireCSRF).Post("/videos/{videoID}/retry", h.retryVideo)
-		api.With(h.requireAuth, h.requireCSRF).Post("/videos/{videoID}/subtitles", h.uploadSubtitle)
+		api.With(h.requireAuth, h.requireCSRF, h.rateLimit("upload", rateLimitUser)).Post("/videos/{videoID}/subtitles", h.uploadSubtitle)
 		api.With(h.requireAuth, h.requireCSRF).Patch("/videos/{videoID}/subtitles/{subtitleID}/default", h.setDefaultSubtitle)
 		api.With(h.requireAuth, h.requireCSRF).Delete("/videos/{videoID}/subtitles/{subtitleID}", h.deleteSubtitle)
 		api.With(h.requireAuth, h.requireCSRF).Post("/videos/{videoID}/like", h.toggleLike)
 		api.With(h.requireAuth, h.requireCSRF).Post("/videos/{videoID}/favorite", h.toggleFavorite)
 		api.With(h.requireAuth, h.requireCSRF).Post("/videos/{videoID}/reports", h.moderation.ReportVideo)
-		api.With(h.requireAuth, h.requireCSRF).Post("/videos/{videoID}/comments", h.createComment)
+		api.With(h.requireAuth, h.requireCSRF, h.rateLimit("comment", rateLimitUser)).Post("/videos/{videoID}/comments", h.createComment)
 		api.With(h.requireAuth, h.requireCSRF).Delete("/videos/{videoID}/comments/{commentID}", h.deleteComment)
 		api.With(h.requireAuth).Get("/me/videos", h.myVideos)
 		api.With(h.requireAuth).Get("/me/following/videos", h.followingVideos)
@@ -228,6 +234,8 @@ func (h *Handler) writeError(w http.ResponseWriter, r *http.Request, err error) 
 		writeProblem(w, r, http.StatusForbidden, "没有权限执行此操作")
 	case errors.Is(err, domain.ErrNotFound):
 		writeProblem(w, r, http.StatusNotFound, "内容不存在")
+	case errors.Is(err, domain.ErrRateLimited):
+		writeProblem(w, r, http.StatusTooManyRequests, "请求过于频繁，请稍后再试")
 	default:
 		h.logger.Error("request failed",
 			"event", "http_handler_error",

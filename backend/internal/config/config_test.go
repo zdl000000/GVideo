@@ -108,3 +108,49 @@ func TestLoadLeavesDevelopmentDiagnosticsBindingToTheOperator(t *testing.T) {
 		t.Fatalf("unexpected development diagnostics addresses: metrics=%q pprof=%q", cfg.MetricsAddr, cfg.PprofAddr)
 	}
 }
+
+func TestLoadRateLimitDefaultsAndOverrides(t *testing.T) {
+	t.Setenv("APP_ENV", "development")
+	t.Setenv("RATE_LIMIT_AUTH_PER_MINUTE", "")
+	t.Setenv("RATE_LIMIT_COMMENT_PER_MINUTE", "")
+	t.Setenv("RATE_LIMIT_UPLOAD_PER_MINUTE", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.RateLimitAuthPerMinute != 20 || cfg.RateLimitCommentPerMinute != 30 || cfg.RateLimitUploadPerMinute != 10 {
+		t.Fatalf("unexpected rate limit defaults: auth=%d comment=%d upload=%d",
+			cfg.RateLimitAuthPerMinute, cfg.RateLimitCommentPerMinute, cfg.RateLimitUploadPerMinute)
+	}
+
+	t.Setenv("RATE_LIMIT_AUTH_PER_MINUTE", "5")
+	t.Setenv("RATE_LIMIT_COMMENT_PER_MINUTE", "0")
+	t.Setenv("RATE_LIMIT_UPLOAD_PER_MINUTE", "12")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.RateLimitAuthPerMinute != 5 || cfg.RateLimitCommentPerMinute != 0 || cfg.RateLimitUploadPerMinute != 12 {
+		t.Fatalf("rate limit overrides not applied: auth=%d comment=%d upload=%d",
+			cfg.RateLimitAuthPerMinute, cfg.RateLimitCommentPerMinute, cfg.RateLimitUploadPerMinute)
+	}
+}
+
+func TestLoadRejectsInvalidRateLimits(t *testing.T) {
+	t.Setenv("APP_ENV", "development")
+
+	t.Setenv("RATE_LIMIT_AUTH_PER_MINUTE", "-1")
+	if _, err := Load(); err == nil {
+		t.Fatal("expected a negative auth rate limit to fail")
+	}
+	t.Setenv("RATE_LIMIT_AUTH_PER_MINUTE", "not-a-number")
+	if _, err := Load(); err == nil {
+		t.Fatal("expected a non-numeric auth rate limit to fail")
+	}
+	t.Setenv("RATE_LIMIT_AUTH_PER_MINUTE", "20")
+	t.Setenv("RATE_LIMIT_UPLOAD_PER_MINUTE", "-2")
+	if _, err := Load(); err == nil {
+		t.Fatal("expected a negative upload rate limit to fail")
+	}
+}

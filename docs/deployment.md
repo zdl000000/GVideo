@@ -27,6 +27,9 @@
 | `HLS_ENABLED` | `true` | 是否生成 HLS |
 | `HLS_TRANSCODE_TIMEOUT` | `30m` | 单视频 HLS 转码超时 |
 | `HLS_SEGMENT_SECONDS` | `4` | HLS 切片目标时长，允许 2 到 10 秒 |
+| `RATE_LIMIT_AUTH_PER_MINUTE` | `20` | 登录/注册按客户端地址的每分钟上限；`0` 表示禁用该档 |
+| `RATE_LIMIT_COMMENT_PER_MINUTE` | `30` | 发表评论按用户的每分钟上限；`0` 表示禁用该档 |
+| `RATE_LIMIT_UPLOAD_PER_MINUTE` | `10` | 视频与字幕上传按用户的每分钟上限；`0` 表示禁用该档 |
 | `GVIDEO_DATA_VOLUME` | `gvideo_gvideo-data` | SQLite 命名卷 |
 | `GVIDEO_MEDIA_VOLUME` | `gvideo_gvideo-media` | 媒体命名卷 |
 | `GVIDEO_HOST` | `video.example.com` | HTTPS 公网主机名 |
@@ -42,6 +45,8 @@
 backend 容器设置 `stop_grace_period: 30s`，长于应用的 15 秒优雅关闭超时。收到停止信号后 HTTP 与管理端口先停止接收请求，媒体 Worker 通过同一取消上下文退出；若转码子进程未及时响应取消，Docker 会在 30 秒宽限期结束后强制终止容器。
 
 `METRICS_ADDR` 与 `PPROF_ADDR` 是两个独立管理端口，均默认关闭。需要诊断时应绑定到 `127.0.0.1` 或隔离的可信管理网络，并由防火墙限制来源；反向代理不得公开 `/metrics` 或 `/debug/pprof/`。pprof 会暴露运行时与请求行为信息，仅在限时排障窗口启用，用完即关闭。
+
+限流说明：登录/注册按客户端地址限流，评论与上传按用户限流，超限返回 `429` 与 `Retry-After`（秒）。后端只信任来自 loopback/私网对端的 `X-Forwarded-For`（从右向左取最后一个公网地址）与 `X-Real-IP`，并且永不信任 `True-Client-IP`；**替换或前置新的反向代理时必须覆写 `X-Forwarded-For` 为 `$remote_addr` 并清空 `True-Client-IP`**，否则客户端可伪造转发链绕过按地址限流。同一 NAT 出口后的用户共享登录配额，容量不足时调高 `RATE_LIMIT_AUTH_PER_MINUTE` 或设为 `0` 关闭该档。被限流的大文件上传可能因请求体未读完而收到连接重置，客户端应把网络错误与 429 一并视为退避信号。
 
 ## Windows 开发环境
 

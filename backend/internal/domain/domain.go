@@ -16,6 +16,7 @@ var (
 	ErrVideoProcessing  = errors.New("video is processing")
 	ErrRetryUnavailable = errors.New("retry unavailable")
 	ErrReportExists     = errors.New("report already exists")
+	ErrRateLimited      = errors.New("rate limited")
 )
 
 type User struct {
