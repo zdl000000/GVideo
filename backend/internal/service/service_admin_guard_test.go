@@ -158,3 +158,22 @@ func TestAuthenticateRejectsMalformedSessionTokens(t *testing.T) {
 		}
 	}
 }
+
+// Unknown usernames take the same bcrypt path as wrong passwords so logins
+// cannot be enumerated by timing.
+func TestLoginUnknownUserReturnsUnauthorized(t *testing.T) {
+	svc, _, ctx := newAdminGuardService(t, "")
+	if _, err := svc.Login(ctx, "no_such_user_01", "password123"); !errors.Is(err, domain.ErrUnauthorized) {
+		t.Fatalf("unknown user login error = %v", err)
+	}
+	known, err := svc.Register(ctx, "timing_user", "password123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Login(ctx, known.User.Username, "wrong-password"); !errors.Is(err, domain.ErrUnauthorized) {
+		t.Fatalf("wrong password login error = %v", err)
+	}
+	if _, err := svc.Login(ctx, known.User.Username, "password123"); err != nil {
+		t.Fatalf("correct login error = %v", err)
+	}
+}
