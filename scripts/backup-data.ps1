@@ -25,6 +25,8 @@ $databasePath = Join-Path $destinationPath "database.db"
 $mediaPath = Join-Path $destinationPath "media.tar.gz"
 $manifestPath = Join-Path $destinationPath "manifest.json"
 $containerPath = "/tmp/gvideo-backup-$stamp.db"
+# Windows 自带 bsdtar：正确处理 C:\ 绝对路径；PATH 上的 GNU tar（Git）会把它当远程主机。
+$nativeTar = Join-Path $env:SystemRoot "System32\tar.exe"
 
 function Assert-LastExitCode([string]$Message) {
     if ($LASTEXITCODE -ne 0) {
@@ -97,7 +99,15 @@ try {
     docker run --rm --entrypoint tar --mount $mediaVolumeMount --mount $backupDirectoryMount $backendImage -czf /backup/media.tar.gz -C /source .
     Assert-LastExitCode "Archiving the media volume failed."
 
-    $archiveEntries = @(tar -tvzf $mediaPath)
+    $archiveEntries = @()
+    $readAttempts = 3
+    for ($readAttempt = 1; $readAttempt -le $readAttempts; $readAttempt++) {
+        $archiveEntries = @(& $nativeTar -tvzf $mediaPath)
+        if ($LASTEXITCODE -eq 0) { break }
+        if ($readAttempt -lt $readAttempts) {
+            Start-Sleep -Seconds (3 * $readAttempt)
+        }
+    }
     Assert-LastExitCode "Reading the media archive failed."
     $mediaFileCount = @($archiveEntries | Where-Object { $_ -and $_[0] -eq "-" }).Count
 

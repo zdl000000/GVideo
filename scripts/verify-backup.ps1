@@ -15,6 +15,8 @@ $maxExpandedBytes = 32GB
 $maxEntryBytes = 2GB
 $maxPathLength = 1024
 $maxPathDepth = 32
+# Windows 自带 bsdtar：正确处理 C:\ 绝对路径；PATH 上的 GNU tar（Git）会把它当远程主机。
+$nativeTar = Join-Path $env:SystemRoot "System32\tar.exe"
 
 function Assert-LastExitCode([string]$Message) {
     if ($LASTEXITCODE -ne 0) {
@@ -159,9 +161,17 @@ try {
     Assert-NoReparsePointInPath $verificationPath "Restore verification directory"
     Copy-Item -LiteralPath $databasePath -Destination (Join-Path $databaseDirectory "gvideo.db")
 
-    $archiveEntries = @(tar -tvzf $mediaPath)
+    $archiveEntries = @()
+    $readAttempts = 3
+    for ($readAttempt = 1; $readAttempt -le $readAttempts; $readAttempt++) {
+        $archiveEntries = @(& $nativeTar -tvzf $mediaPath)
+        if ($LASTEXITCODE -eq 0) { break }
+        if ($readAttempt -lt $readAttempts) {
+            Start-Sleep -Seconds (3 * $readAttempt)
+        }
+    }
     Assert-LastExitCode "Reading the media archive failed."
-    $archivePaths = @(tar -tzf $mediaPath)
+    $archivePaths = @(& $nativeTar -tzf $mediaPath)
     Assert-LastExitCode "Reading media archive paths failed."
     if ($archivePaths.Count -ne $archiveEntries.Count) {
         throw "Media archive path and detail listings do not match."
@@ -201,7 +211,7 @@ try {
         }
         $expandedBytes += $entryBytes
     }
-    tar -xzf $mediaPath -C $mediaDirectory
+    & $nativeTar -xzf $mediaPath -C $mediaDirectory
     Assert-LastExitCode "Extracting the media archive failed."
 
     $mediaFileCount = @(Get-ChildItem -LiteralPath $mediaDirectory -Recurse -File).Count
