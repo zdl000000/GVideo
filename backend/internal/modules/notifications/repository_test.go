@@ -45,13 +45,13 @@ func TestNotificationsLifecycleAndOwnership(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := legacy.CreateNotification(ctx, recipient.ID, actor.ID, "comment", video.ID, comment.ID, video.Title, comment.Content); err != nil {
+	if err := repo.Create(ctx, recipient.ID, actor.ID, "comment", video.ID, comment.ID, video.Title, comment.Content); err != nil {
 		t.Fatal(err)
 	}
-	if err := legacy.CreateNotification(ctx, recipient.ID, actor.ID, "like", video.ID, 0, video.Title, ""); err != nil {
+	if err := repo.Create(ctx, recipient.ID, actor.ID, "like", video.ID, 0, video.Title, ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := legacy.CreateNotification(ctx, recipient.ID, recipient.ID, "favorite", video.ID, 0, video.Title, ""); err != nil {
+	if err := repo.Create(ctx, recipient.ID, recipient.ID, "favorite", video.ID, 0, video.Title, ""); err != nil {
 		t.Fatal(err)
 	}
 

@@ -12,6 +12,7 @@ import (
 	"gvideo/backend/internal/modules/comments"
 	"gvideo/backend/internal/modules/interactions"
 	"gvideo/backend/internal/platform"
+	"gvideo/backend/internal/platform/bus"
 	"gvideo/backend/internal/repository"
 )
 
@@ -85,9 +86,18 @@ func TestInteractionNotificationsAndSelfSuppression(t *testing.T) {
 	defer db.Close()
 	repo := repository.New(db)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	commentSvc := comments.NewService(comments.NewRepository(db), logger)
-	interactionsSvc := interactions.NewService(interactions.NewRepository(db), logger)
-	svc := NewService(NewRepository(db))
+	// 真实总线接线：本测试即「发布方事件 → notifications 写路径」的进程内
+	// 端到端验证（同步分发，与生产 main.go 的装配一致）。
+	eventBus := bus.New()
+	notificationsRepo := NewRepository(db)
+	eventBus.Subscribe(func(ctx context.Context, event bus.NotificationEvent) {
+		if err := notificationsRepo.Create(ctx, event.RecipientID, event.ActorID, event.Kind, event.VideoID, event.CommentID, event.VideoTitle, event.CommentPreview); err != nil {
+			logger.Warn("record notification", "kind", event.Kind, "error", err)
+		}
+	})
+	commentSvc := comments.NewService(comments.NewRepository(db), eventBus, logger)
+	interactionsSvc := interactions.NewService(interactions.NewRepository(db), eventBus, logger)
+	svc := NewService(notificationsRepo)
 	ctx := context.Background()
 	owner, err := repo.CreateUser(ctx, "notification_owner", "hash")
 	if err != nil {

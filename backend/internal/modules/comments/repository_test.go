@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"gvideo/backend/internal/domain"
+	"gvideo/backend/internal/modules/notifications"
 	"gvideo/backend/internal/platform"
 	"gvideo/backend/internal/repository"
 )
@@ -118,10 +119,10 @@ func TestMirroredCreateNotificationSuppressesSelfComment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.createNotification(ctx, owner.ID, actor.ID, "comment", video.ID, comment.ID, video.Title, comment.Content); err != nil {
+	if err := notifications.NewRepository(db).Create(ctx, owner.ID, actor.ID, "comment", video.ID, comment.ID, video.Title, comment.Content); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.createNotification(ctx, owner.ID, owner.ID, "comment", video.ID, comment.ID, video.Title, "self comment"); err != nil {
+	if err := notifications.NewRepository(db).Create(ctx, owner.ID, owner.ID, "comment", video.ID, comment.ID, video.Title, "self comment"); err != nil {
 		t.Fatal(err)
 	}
 

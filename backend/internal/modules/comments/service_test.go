@@ -11,12 +11,21 @@ import (
 
 	"gvideo/backend/internal/domain"
 	"gvideo/backend/internal/platform"
+	"gvideo/backend/internal/platform/bus"
 	"gvideo/backend/internal/repository"
 )
 
+// 记录型发布方：捕获服务发布的通知事件供断言。
+type publisherStub struct{ events []bus.NotificationEvent }
+
+func (p *publisherStub) Publish(_ context.Context, event bus.NotificationEvent) {
+	p.events = append(p.events, event)
+}
+
 func TestServiceValidationAndDelegation(t *testing.T) {
 	repo := &serviceRepositoryStub{}
-	svc := NewService(repo, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	pub := &publisherStub{}
+	svc := NewService(repo, pub, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	ctx := context.Background()
 	for name, content := range map[string]string{
 		"empty":    "",
@@ -50,10 +59,13 @@ func TestServiceValidationAndDelegation(t *testing.T) {
 	if err != nil || created.ID != 9 || repo.createUserID != 7 || repo.createVideoID != 5 || repo.createContent != "hello" {
 		t.Fatalf("create = %#v err=%v repo=%#v", created, err, repo)
 	}
-	if !repo.notificationCalled || repo.notificationRecipient != 4 || repo.notificationActor != 7 ||
-		repo.notificationType != "comment" || repo.notificationVideoID != 5 || repo.notificationCommentID != 9 ||
-		repo.notificationVideoTitle != "Video title" || repo.notificationPreview != "hello" {
-		t.Fatalf("author notification = %#v", repo)
+	if !repo.notificationCalled && len(pub.events) != 1 {
+		t.Fatalf("author notification event missing: pub=%#v", pub.events)
+	}
+	event := pub.events[0]
+	if event.RecipientID != 4 || event.ActorID != 7 || event.Kind != "comment" ||
+		event.VideoID != 5 || event.CommentID != 9 || event.VideoTitle != "Video title" || event.CommentPreview != "hello" {
+		t.Fatalf("author notification event = %#v", event)
 	}
 	if err := svc.DeleteComment(ctx, 7, 5, 3); err != nil || !repo.deleteCalled ||
 		repo.deleteUserID != 7 || repo.deleteVideoID != 5 || repo.deleteCommentID != 3 {
@@ -68,7 +80,7 @@ func TestServiceValidationAndDelegation(t *testing.T) {
 
 func TestServiceNotificationFailureDoesNotFailComment(t *testing.T) {
 	repo := &serviceRepositoryStub{notificationErr: errors.New("notification write failed"), comment: domain.Comment{ID: 9, Content: "hello"}}
-	svc := NewService(repo, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	svc := NewService(repo, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	comment, err := svc.CreateComment(context.Background(), 7, 5, "hello")
 	if err != nil || comment.ID != 9 {
 		t.Fatalf("comment = %#v err=%v; notification failures must only be logged", comment, err)
@@ -155,7 +167,7 @@ func TestPrivateVideoCommentsAuthorization(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := NewService(NewRepository(db), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	svc := NewService(NewRepository(db), nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	if _, err := svc.Comments(ctx, privateVideo.ID, 0); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("anonymous private comments error = %v, want not found", err)

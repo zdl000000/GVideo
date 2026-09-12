@@ -34,8 +34,8 @@ func TestNotificationInvalidIDKeepsDedicatedMessage(t *testing.T) {
 	handler := New(service.New(repository.New(db), cfg, logger),
 		moderation.NewService(moderation.NewRepository(db)),
 		notifications.NewService(notifications.NewRepository(db)),
-		comments.NewService(comments.NewRepository(db), logger),
-		interactions.NewService(interactions.NewRepository(db), logger),
+		comments.NewService(comments.NewRepository(db), nil, logger),
+		interactions.NewService(interactions.NewRepository(db), nil, logger),
 		cfg, logger).Routes()
 	user := registerTestUser(t, handler, "notif_id_user")
 

@@ -10,12 +10,21 @@ import (
 
 	"gvideo/backend/internal/domain"
 	"gvideo/backend/internal/platform"
+	"gvideo/backend/internal/platform/bus"
 	"gvideo/backend/internal/repository"
 )
 
+// 记录型发布方：捕获服务发布的通知事件供断言。
+type publisherStub struct{ events []bus.NotificationEvent }
+
+func (p *publisherStub) Publish(_ context.Context, event bus.NotificationEvent) {
+	p.events = append(p.events, event)
+}
+
 func TestServiceValidationAndDelegation(t *testing.T) {
 	repo := &serviceRepositoryStub{authorID: 4, videoTitle: "Video title"}
-	svc := NewService(repo, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	pub := &publisherStub{}
+	svc := NewService(repo, pub, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	ctx := context.Background()
 
 	if _, err := svc.ToggleFollow(ctx, 0, 4); !errors.Is(err, domain.ErrInvalidInput) {
@@ -41,10 +50,8 @@ func TestServiceValidationAndDelegation(t *testing.T) {
 		!repo.followCalled || repo.followFollowerID != 7 || repo.followFollowedID != 4 {
 		t.Fatalf("follow = %v err=%v repo=%#v", active, err, repo)
 	}
-	if !repo.notificationCalled || repo.notificationRecipient != 4 || repo.notificationActor != 7 ||
-		repo.notificationType != "follow" || repo.notificationVideoID != 0 || repo.notificationCommentID != 0 ||
-		repo.notificationVideoTitle != "" || repo.notificationPreview != "" {
-		t.Fatalf("follow notification = %#v", repo)
+	if len(pub.events) != 1 || pub.events[0].RecipientID != 4 || pub.events[0].ActorID != 7 || pub.events[0].Kind != "follow" {
+		t.Fatalf("follow notification events = %#v", pub.events)
 	}
 
 	active, err = svc.ToggleLike(ctx, 7, 5)
@@ -52,27 +59,26 @@ func TestServiceValidationAndDelegation(t *testing.T) {
 		repo.authVideoID != 5 || repo.authViewerID != 7 {
 		t.Fatalf("like = %v err=%v repo=%#v", active, err, repo)
 	}
-	if !repo.notificationCalled || repo.notificationRecipient != 4 || repo.notificationActor != 7 ||
-		repo.notificationType != "like" || repo.notificationVideoID != 5 || repo.notificationCommentID != 0 ||
-		repo.notificationVideoTitle != "Video title" || repo.notificationPreview != "" {
-		t.Fatalf("like notification = %#v", repo)
+	if len(pub.events) != 2 || pub.events[1].RecipientID != 4 || pub.events[1].ActorID != 7 || pub.events[1].Kind != "like" || pub.events[1].VideoID != 5 {
+		t.Fatalf("like notification events = %#v", pub.events)
 	}
 
 	active, err = svc.ToggleFavorite(ctx, 7, 5)
 	if err != nil || !active || !repo.favoriteCalled || repo.favoriteUserID != 7 || repo.favoriteVideoID != 5 {
 		t.Fatalf("favorite = %v err=%v repo=%#v", active, err, repo)
 	}
-	if repo.notificationType != "favorite" {
-		t.Fatalf("favorite notification type = %q", repo.notificationType)
+	if pub.events[2].Kind != "favorite" {
+		t.Fatalf("favorite notification events = %#v", pub.events)
 	}
 }
 
-func TestServiceNotificationFailureDoesNotFailToggle(t *testing.T) {
-	repo := &serviceRepositoryStub{authorID: 4, videoTitle: "Video title", active: true, notificationErr: errors.New("notification write failed")}
-	svc := NewService(repo, slog.New(slog.NewTextHandler(io.Discard, nil)))
+// 未接线事件总线（nil 发布方）时互动仍须成功：通知写失败只影响通知本身。
+func TestToggleWithoutPublisherSucceeds(t *testing.T) {
+	repo := &serviceRepositoryStub{authorID: 4, videoTitle: "Video title", active: true}
+	svc := NewService(repo, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	active, err := svc.ToggleLike(context.Background(), 7, 5)
 	if err != nil || !active {
-		t.Fatalf("like = %v err=%v; notification failures must only be logged", active, err)
+		t.Fatalf("like = %v err=%v; nil publisher must not fail the toggle", active, err)
 	}
 }
 
@@ -102,7 +108,7 @@ func TestPrivateVideoInteractionAndFollowRules(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := NewService(NewRepository(db), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	svc := NewService(NewRepository(db), nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	if _, err := svc.ToggleLike(ctx, viewer.ID, privateVideo.ID); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("viewer private like error = %v, want not found", err)
@@ -147,25 +153,19 @@ func TestPrivateVideoInteractionAndFollowRules(t *testing.T) {
 }
 
 type serviceRepositoryStub struct {
-	authorID                                    int64
-	videoTitle                                  string
-	active                                      bool
-	userErr                                     error
-	notificationErr                             error
-	userExistsCalled                            bool
-	userExistsID                                int64
-	followCalled                                bool
-	followFollowerID, followFollowedID          int64
-	likeCalled                                  bool
-	likeUserID, likeVideoID                     int64
-	favoriteCalled                              bool
-	favoriteUserID, favoriteVideoID             int64
-	authVideoID, authViewerID                   int64
-	notificationCalled                          bool
-	notificationRecipient, notificationActor    int64
-	notificationType                            string
-	notificationVideoID, notificationCommentID  int64
-	notificationVideoTitle, notificationPreview string
+	authorID                           int64
+	videoTitle                         string
+	active                             bool
+	userErr                            error
+	userExistsCalled                   bool
+	userExistsID                       int64
+	followCalled                       bool
+	followFollowerID, followFollowedID int64
+	likeCalled                         bool
+	likeUserID, likeVideoID            int64
+	favoriteCalled                     bool
+	favoriteUserID, favoriteVideoID    int64
+	authVideoID, authViewerID          int64
 }
 
 func (s *serviceRepositoryStub) VideoAuthorID(_ context.Context, videoID, viewerID int64) (int64, string, error) {
@@ -191,10 +191,4 @@ func (s *serviceRepositoryStub) ToggleFavorite(_ context.Context, userID, videoI
 func (s *serviceRepositoryStub) ToggleFollow(_ context.Context, followerID, followedID int64) (bool, error) {
 	s.followCalled, s.followFollowerID, s.followFollowedID = true, followerID, followedID
 	return s.active, nil
-}
-
-func (s *serviceRepositoryStub) createNotification(_ context.Context, recipientID, actorID int64, notificationType string, videoID, commentID int64, videoTitle, commentPreview string) error {
-	s.notificationCalled, s.notificationRecipient, s.notificationActor, s.notificationType = true, recipientID, actorID, notificationType
-	s.notificationVideoID, s.notificationCommentID, s.notificationVideoTitle, s.notificationPreview = videoID, commentID, videoTitle, commentPreview
-	return s.notificationErr
 }

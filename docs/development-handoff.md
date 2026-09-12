@@ -6,13 +6,11 @@
 
 ## 1. 当前状态
 
-✅ **A2-3「interactions 纵向模块迁移」已完成交付**（本会话内总控接管执行并复审）。批次 1-25 均已提交并推送至 `origin/codex/security-hardening`。
+✅ **A2-4「进程内事件总线」已完成交付**——A2 结构迁移序列（4/4 模块 + 事件总线）全部收官。批次 1-27 均已提交并推送至 `origin/codex/security-hardening`。
 
-本批把点赞/收藏/关注从技术分层迁入 `backend/internal/modules/interactions/`（comments 模板）：repository（Toggle 三方法 SQL 逐字迁移 + `VideoAuthorID` 可见性谓词镜像 + `UserExists` 消费方存在性查询 + `createNotification` 镜像）、service（可见性校验→toggle→active 时写通知，Warn-only）、handler（HTTPPort + 共用私有 toggle 辅助）+ 三层测试；核心同名文件删除，`VideoByID` 评论计数子查询与 `CreatorStats` 留核心（计数直接源自 comments/likes/favorites 表，始终同步）。已知可接受偏差：点赞/收藏的视频校验不再读取字幕列表（原 VideoByID 附带，失败场景不传播）。
+本批新增 `internal/platform/bus`（类型化同步事件总线：`NotificationEvent` + `Publish/Subscribe`，订阅者在发布方 goroutine 内联执行，保持「通知随请求落库」语义）；notifications 模块仓库成为通知写路径的唯一所有者（`Create` 含自评抑制与空值防护，自核心 CreateNotification 迁入，核心文件已删除）；comments 与 interactions 模块改为经消费方自定义 `EventPublisher` 接口发布事件，三份镜像 INSERT 全部消除；跨模块集成测试接入真实总线，成为「发布方事件 → 通知写路径」的端到端验证。
 
-**模块化迁移至此 4/4 完成**（moderation、notifications、comments、interactions），架构守卫 `TestModulesDoNotImportCoreLayers` 钉住边界。后续队列见 §5（事件总线统一通知写路径为下一架构任务）。
-
-交付程序：显式暂存本批路径并复核 staged diff 后提交 `feat: extract interactions vertical module`，推送 `codex/security-hardening` 并核对本地/远端一致。不得使用 `git add .`，不得 amend、force push 或直接推送 main。
+交付程序：显式暂存本批路径并复核 staged diff 后提交 `feat: add in-process event bus for notifications`，推送 `codex/security-hardening` 并核对本地/远端一致。不得使用 `git add .`，不得 amend、force push 或直接推送 main。
 
 ## 2. 已完成的实现（本批三工作流）
 
@@ -73,6 +71,7 @@
 24. `SEC-03c`：CSP 收紧（去 `unsafe-inline`/`data:`）与管理端点警告边界用例。本批。
 25. `FIX-01`：`/auth?next` 注册竞态修复（AuthRedirect）与真实 MP4 E2E 夹具治理。
 26. `A2-3`：interactions 纵向模块（Toggle 三方法迁移、通知镜像写、消费方查询、三层测试）。本批。
+27. `A2-4`：进程内事件总线（platform/bus 类型化同步分发、notifications 写所有者迁移、comments/interactions 改事件发布、三份镜像 INSERT 消除）。本批。
 
 ## 5. 当前任务与后续队列
 
@@ -94,13 +93,13 @@
 - 目标测试、全仓静态门禁和代码只读联合审查均无阻断后，可以提交并推送开发分支。
 - 合并和实际生产部署仍遵循仓库审查与组织变更批准。
 
-## 6.1 2026-09-12 A2-3 交付点
+## 6.1 2026-09-12 A2-4 交付点
 
-- 分支：`codex/security-hardening`（承接第二并行集成批次 `846d082`）。
-- 预期修改/新增文件：新增 `backend/internal/modules/interactions/`（6 文件）；删除 `backend/internal/httpapi/handlers_interactions.go`、`backend/internal/service/service_interactions.go`、`backend/internal/repository/repository_interactions.go`；修改 `backend/cmd/server/main.go`、`backend/internal/httpapi/{httpapi.go,handlers_users.go,httpapi_test.go,health_test.go,middleware_ratelimit_test.go,notifications_http_test.go,quota_http_test.go}`、`backend/internal/repository/{repository.go,repository_notifications.go,repository_test.go}`、`backend/internal/service/{service_users.go,service_test.go}`、`docs/development-handoff.md`。
-- 静态门禁：`go test ./... -count=1` 全包通过、`go vet`、`gofmt`、`scripts/check.ps1`、`git diff --check` 通过。
-- 复审：总控逐点比对（可见性谓词逐字一致、通知写路径 Warn-only 语义保留、`UserExists` 语义等价、接线 16 处完整）；已知可接受偏差（点赞/收藏校验不再读取字幕列表）已记录。
-- Git 交付顺序：显式暂存上述路径，复核 `git diff --cached --check` 与 staged diff，提交 `feat: extract interactions vertical module`，推送当前开发分支并核对本地/远端一致。
+- 分支：`codex/security-hardening`（承接 A2-3 的 `0ca849e`）。
+- 修改/新增文件：新增 `backend/internal/platform/bus/{bus.go,bus_test.go}`；新增 `backend/internal/modules/comments/`（事件发布改造 + 镜像删除）；修改 `backend/internal/modules/{comments,interactions,notifications}` 三模块、`backend/cmd/server/main.go`（总线装配 + 订阅）、删除 `backend/internal/repository/repository_notifications.go`（写路径迁入 notifications 模块）、相关测试迁移。
+- 静态门禁：`scripts/check.ps1`、`go test ./... -count=1`、`go vet`、`gofmt`、`git diff --check` 通过。
+- 行为保持：同步分发（订阅者在发布方 goroutine 内联）、自评抑制与空值防护随迁、通知失败仅告警不影响主流程。
+- Git 交付顺序：显式暂存上述路径，复核 `git diff --cached --check` 与 staged diff，提交 `feat: add in-process event bus for notifications`，推送当前开发分支并核对本地/远端一致。
 - 不创建自动守护任务；本批工作在当前会话内完成交付。
 
 ## 7. 最终门禁与 Git
