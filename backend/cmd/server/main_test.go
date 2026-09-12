@@ -213,6 +213,11 @@ func TestDiagnosticsBindingWarnings(t *testing.T) {
 			t.Fatalf("warning %q does not name the endpoint", warning)
 		}
 	}
+	for _, warning := range diagnosticsBindingWarnings("development", "", "0.0.0.0:6060") {
+		if !strings.Contains(warning, "PPROF_ADDR") {
+			t.Fatalf("warning %q does not name the endpoint", warning)
+		}
+	}
 	if warnings := diagnosticsBindingWarnings("development", "", ""); len(warnings) != 0 {
 		t.Fatalf("disabled diagnostics should not warn: %v", warnings)
 	}
