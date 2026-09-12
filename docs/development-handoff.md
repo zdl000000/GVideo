@@ -6,13 +6,13 @@
 
 ## 1. 当前状态
 
-本周期为第二个多 agent 并行集成批次，三个工作流已完成实现、验证与复审，正在进入 Git 交付阶段：
+✅ **A2-3「interactions 纵向模块迁移」已完成交付**（本会话内总控接管执行并复审）。批次 1-25 均已提交并推送至 `origin/codex/security-hardening`。
 
-1. **A2-2 comments 纵向模块**：评论功能迁入 `backend/internal/modules/comments/`（notifications 模板：repository/service/handler + HTTPPort + 三层测试）。关键决策：CreateComment 成功后的作者通知写入在模块 repo 内**镜像**核心 `CreateNotification`（自评抑制逐字保留，注释标注待事件总线统一接管）；视频可见性校验为模块自有 `VideoAuthorID`（谓词与核心 VideoByID 逐字一致，多返回 title 供通知快照）。总控逐行比对确认行为零改变。
-2. **SEC-03c CSP 收紧**：SPA CSP 移除 `style-src 'unsafe-inline'` 与 `img-src data:`（React 走 CSSOM 设样式、全仓无 data: 图片，复审逐项确认安全）；`diagnosticsBindingWarnings` 补 4 个边界断言（主机名、缺端口、IPv4-mapped loopback、通配 IPv6）。
-3. **产品修复 + 夹具治理**：修复 `/auth?next` 注册竞态（`AuthRedirect` 组件按 next 回跳站内路径，拒绝 `//` 与绝对 URL）；E2E 上传夹具由假签名 MP4 换为**真实 MP4**（后端容器内 ffmpeg 生成，可正常转码），根治环境库损坏卡片污染；烟雾脚本改为只挑 `ready` 视频。
+本批把点赞/收藏/关注从技术分层迁入 `backend/internal/modules/interactions/`（comments 模板）：repository（Toggle 三方法 SQL 逐字迁移 + `VideoAuthorID` 可见性谓词镜像 + `UserExists` 消费方存在性查询 + `createNotification` 镜像）、service（可见性校验→toggle→active 时写通知，Warn-only）、handler（HTTPPort + 共用私有 toggle 辅助）+ 三层测试；核心同名文件删除，`VideoByID` 评论计数子查询与 `CreatorStats` 留核心（计数直接源自 comments/likes/favorites 表，始终同步）。已知可接受偏差：点赞/收藏的视频校验不再读取字幕列表（原 VideoByID 附带，失败场景不传播）。
 
-待办：显式暂存本批 22 个路径并复核 staged diff 后提交，推送 `codex/security-hardening` 并核对本地/远端一致。不得使用 `git add .`，不得 amend、force push 或直接推送 main。
+**模块化迁移至此 4/4 完成**（moderation、notifications、comments、interactions），架构守卫 `TestModulesDoNotImportCoreLayers` 钉住边界。后续队列见 §5（事件总线统一通知写路径为下一架构任务）。
+
+交付程序：显式暂存本批路径并复核 staged diff 后提交 `feat: extract interactions vertical module`，推送 `codex/security-hardening` 并核对本地/远端一致。不得使用 `git add .`，不得 amend、force push 或直接推送 main。
 
 ## 2. 已完成的实现（本批三工作流）
 
@@ -71,7 +71,8 @@
 22. `SEC-04b`：配额边界/删除释放强断言测试与升级指引。
 23. `A2-2`：comments 纵向模块（含通知镜像写、VideoAuthorID、三层测试）。本批。
 24. `SEC-03c`：CSP 收紧（去 `unsafe-inline`/`data:`）与管理端点警告边界用例。本批。
-25. `FIX-01`：`/auth?next` 注册竞态修复（AuthRedirect）与真实 MP4 E2E 夹具治理。本批。
+25. `FIX-01`：`/auth?next` 注册竞态修复（AuthRedirect）与真实 MP4 E2E 夹具治理。
+26. `A2-3`：interactions 纵向模块（Toggle 三方法迁移、通知镜像写、消费方查询、三层测试）。本批。
 
 ## 5. 当前任务与后续队列
 
@@ -93,13 +94,13 @@
 - 目标测试、全仓静态门禁和代码只读联合审查均无阻断后，可以提交并推送开发分支。
 - 合并和实际生产部署仍遵循仓库审查与组织变更批准。
 
-## 6.1 2026-09-12 第二并行集成批次交付点
+## 6.1 2026-09-12 A2-3 交付点
 
-- 分支：`codex/security-hardening`（承接集成批次 `2e01b27`）。
-- 预期修改/新增文件（22 个路径，以 `git status` 为准）：删除 `backend/internal/httpapi/handlers_comments.go`、`backend/internal/repository/repository_comments.go`、`backend/internal/service/service_comments.go`；新增 `backend/internal/modules/comments/`（6 文件）、`frontend/e2e/fixtures/sample.mp4`；修改 `backend/cmd/server/{main.go,main_test.go}`、`backend/internal/httpapi/{health_test.go,httpapi.go,httpapi_test.go,middleware_ratelimit_test.go,notifications_http_test.go,quota_http_test.go}`、`backend/internal/modules/notifications/{repository_test.go,service_test.go}`、`backend/internal/repository/repository_test.go`、`backend/internal/service/service_test.go`、`frontend/{e2e/notifications.spec.ts,nginx.conf,src/app/App.tsx,src/features/auth/AuthPage.tsx,src/features/auth/AuthPage.test.tsx}`、`docs/development-handoff.md`。
-- 静态门禁：`scripts/check.ps1`、`go test ./... -count=1`、`go vet`、`gofmt`、`git diff --check` 通过。
-- 运行门禁：backend/frontend 重建后 healthy；`/readyz` 200；E2E 全量回归 12 passed / 2 skipped（含评论旅程在 comments 模块后端上的实测）；CSP 烟雾零违规。
-- Git 交付顺序：显式暂存上述路径，复核 `git diff --cached --check` 与 staged diff，提交 `feat: extract comments module and tighten CSP`，推送当前开发分支并核对本地/远端一致。
+- 分支：`codex/security-hardening`（承接第二并行集成批次 `846d082`）。
+- 预期修改/新增文件：新增 `backend/internal/modules/interactions/`（6 文件）；删除 `backend/internal/httpapi/handlers_interactions.go`、`backend/internal/service/service_interactions.go`、`backend/internal/repository/repository_interactions.go`；修改 `backend/cmd/server/main.go`、`backend/internal/httpapi/{httpapi.go,handlers_users.go,httpapi_test.go,health_test.go,middleware_ratelimit_test.go,notifications_http_test.go,quota_http_test.go}`、`backend/internal/repository/{repository.go,repository_notifications.go,repository_test.go}`、`backend/internal/service/{service_users.go,service_test.go}`、`docs/development-handoff.md`。
+- 静态门禁：`go test ./... -count=1` 全包通过、`go vet`、`gofmt`、`scripts/check.ps1`、`git diff --check` 通过。
+- 复审：总控逐点比对（可见性谓词逐字一致、通知写路径 Warn-only 语义保留、`UserExists` 语义等价、接线 16 处完整）；已知可接受偏差（点赞/收藏校验不再读取字幕列表）已记录。
+- Git 交付顺序：显式暂存上述路径，复核 `git diff --cached --check` 与 staged diff，提交 `feat: extract interactions vertical module`，推送当前开发分支并核对本地/远端一致。
 - 不创建自动守护任务；本批工作在当前会话内完成交付。
 
 ## 7. 最终门禁与 Git

@@ -22,7 +22,7 @@ func TestLivezReportsProcessLivenessWithoutDependencies(t *testing.T) {
 
 	// Nil application services prove that liveness does not query the database,
 	// media worker, queue, or external commands.
-	routes := New(nil, nil, nil, nil, cfg, logger).Routes()
+	routes := New(nil, nil, nil, nil, nil, cfg, logger).Routes()
 
 	for _, path := range []string{"/livez", "/healthz"} {
 		t.Run(path, func(t *testing.T) {
@@ -87,7 +87,7 @@ func TestReadyzReportsOnlyDatabaseReadiness(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			routes := New(nil, nil, nil, nil, cfg, logger).WithReadiness(test.checker).Routes()
+			routes := New(nil, nil, nil, nil, nil, cfg, logger).WithReadiness(test.checker).Routes()
 			response := httptest.NewRecorder()
 			request := httptest.NewRequest(http.MethodGet, "/readyz", nil)
 			request.AddCookie(&http.Cookie{Name: sessionCookie, Value: "must-not-be-authenticated"})
@@ -120,7 +120,7 @@ func TestReadyzReportsOnlyDatabaseReadiness(t *testing.T) {
 	}
 
 	notAllowed := httptest.NewRecorder()
-	New(nil, nil, nil, nil, cfg, logger).Routes().ServeHTTP(notAllowed, httptest.NewRequest(http.MethodPost, "/readyz", nil))
+	New(nil, nil, nil, nil, nil, cfg, logger).Routes().ServeHTTP(notAllowed, httptest.NewRequest(http.MethodPost, "/readyz", nil))
 	if notAllowed.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("POST /readyz status=%d, want %d", notAllowed.Code, http.StatusMethodNotAllowed)
 	}

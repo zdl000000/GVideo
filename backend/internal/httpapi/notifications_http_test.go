@@ -12,6 +12,7 @@ import (
 
 	"gvideo/backend/internal/config"
 	"gvideo/backend/internal/modules/comments"
+	"gvideo/backend/internal/modules/interactions"
 	"gvideo/backend/internal/modules/moderation"
 	"gvideo/backend/internal/modules/notifications"
 	"gvideo/backend/internal/platform"
@@ -34,6 +35,7 @@ func TestNotificationInvalidIDKeepsDedicatedMessage(t *testing.T) {
 		moderation.NewService(moderation.NewRepository(db)),
 		notifications.NewService(notifications.NewRepository(db)),
 		comments.NewService(comments.NewRepository(db), logger),
+		interactions.NewService(interactions.NewRepository(db), logger),
 		cfg, logger).Routes()
 	user := registerTestUser(t, handler, "notif_id_user")
 

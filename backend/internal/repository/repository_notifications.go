@@ -5,9 +5,10 @@ import (
 	"fmt"
 )
 
-// CreateNotification is the cross-cutting notification write path used by core
-// flows (follows, comments, interactions). The notification read side lives in
-// internal/modules/notifications.
+// CreateNotification is the cross-cutting notification write path; the
+// notification read side lives in internal/modules/notifications. The
+// comments and interactions modules mirror this INSERT until the event bus
+// lands and the notifications module takes over the write side.
 func (r *Repository) CreateNotification(ctx context.Context, recipientID, actorID int64, notificationType string, videoID, commentID int64, videoTitle, commentPreview string) error {
 	if recipientID <= 0 || notificationType == "" || recipientID == actorID {
 		return nil
