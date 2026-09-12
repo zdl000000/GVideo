@@ -47,7 +47,7 @@ backend 容器设置 `stop_grace_period: 30s`，长于应用的 15 秒优雅关�
 
 `METRICS_ADDR` 与 `PPROF_ADDR` 是两个独立管理端口，均默认关闭。需要诊断时应绑定到 `127.0.0.1` 或隔离的可信管理网络，并由防火墙限制来源；反向代理不得公开 `/metrics` 或 `/debug/pprof/`。pprof 会暴露运行时与请求行为信息，仅在限时排障窗口启用，用完即关闭。生产环境会拒绝非 loopback/私网的绑定；非生产环境下绑定非 loopback 地址时启动会记录 `diagnostics_binding_exposed` 警告，提示该端点可被 loopback 之外的网络访问。
 
-安全响应头：后端对所有 API 与媒体响应设置 `X-Content-Type-Options: nosniff`、`X-Frame-Options: DENY`、`Referrer-Policy: strict-origin-when-cross-origin`、`Permissions-Policy`（关闭摄像头/麦克风/定位）以及 `Content-Security-Policy: default-src 'none'`；前端 Nginx 为 SPA 与代理响应设置框架拒绝与 CSP，并关闭 `server_tokens`。**自定义域名或替换反代时，如果为 HTML 覆盖 CSP，必须保留 `media-src 'self' blob:` 与 `worker-src 'self' blob:`**，否则 hls.js 的 MediaSource 播放与解码 Worker 会被浏览器拒绝。
+安全响应头：后端对所有 API 与媒体响应设置 `X-Content-Type-Options: nosniff`、`X-Frame-Options: DENY`、`Referrer-Policy: strict-origin-when-cross-origin`、`Permissions-Policy`（关闭摄像头/麦克风/定位）以及 `Content-Security-Policy: default-src 'none'`；前端 Nginx 只为 SPA 文档与静态资源（`location /`、`/theme-init.js`）下发 SPA 安全头集（含收紧后的 CSP），对 `/api`、`/media` 与健康端点纯透传后端安全头，避免同一响应叠加两份头；`server_tokens` 已关闭。**自定义域名或替换反代时，如果为 HTML 覆盖 CSP，必须保留 `media-src 'self' blob:` 与 `worker-src 'self' blob:`**，否则 hls.js 的 MediaSource 播放与解码 Worker 会被浏览器拒绝。
 
 限流说明：登录/注册按客户端地址限流，评论与上传按用户限流，超限返回 `429` 与 `Retry-After`（秒）。后端只信任来自 loopback/私网对端的 `X-Forwarded-For`（从右向左取最后一个公网地址）与 `X-Real-IP`，并且永不信任 `True-Client-IP`；**替换或前置新的反向代理时必须覆写 `X-Forwarded-For` 为 `$remote_addr` 并清空 `True-Client-IP`**，否则客户端可伪造转发链绕过按地址限流。同一 NAT 出口后的用户共享登录配额，容量不足时调高 `RATE_LIMIT_AUTH_PER_MINUTE` 或设为 `0` 关闭该档。被限流的大文件上传可能因请求体未读完而收到连接重置，客户端应把网络错误与 429 一并视为退避信号。
 

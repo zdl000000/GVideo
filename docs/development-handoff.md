@@ -6,13 +6,13 @@
 
 ## 1. 当前状态
 
-✅ **A2-4「进程内事件总线」已完成交付**——A2 结构迁移序列（4/4 模块 + 事件总线）全部收官。批次 1-27 均已提交并推送至 `origin/codex/security-hardening`。
+✅ **SEC-03c「CSP 收紧收尾 + nginx 头行为补充覆盖」已完成交付**——A2 迁移序列（4/4 模块 + 事件总线，批次 27）之后的本周期批次 28 已提交并推送至 `origin/codex/security-hardening`。
 
-本批新增 `internal/platform/bus`（类型化同步事件总线：`NotificationEvent` + `Publish/Subscribe`，订阅者在发布方 goroutine 内联执行，保持「通知随请求落库」语义）；notifications 模块仓库成为通知写路径的唯一所有者（`Create` 含自评抑制与空值防护，自核心 CreateNotification 迁入，核心文件已删除）；comments 与 interactions 模块改为经消费方自定义 `EventPublisher` 接口发布事件，三份镜像 INSERT 全部消除；跨模块集成测试接入真实总线，成为「发布方事件 → 通知写路径」的端到端验证。
+本批修复代理路径上的重复安全头：此前前端源 nginx 的 server 级 `add_header ... always` 继承进 `/api/`、`/media/`、健康端点等代理 location，与后端中间件自产的安全头（含 deny-all CSP）叠加，实测每个响应头两份（两种不同 CSP 并存），且经 HTTPS 网关后 CSP 仍两份。修复后 SPA 安全头集仅由 `location /` 与 `location = /theme-init.js` 下发（`theme-init.js` 的 no-cache 语义保留），代理 location 纯透传后端单份头（deny-all CSP 保留）；网关链路实测全链路每头一份。新增 `frontend/e2e/security-headers.spec.ts` 钉住六类响应的头行为（SPA 文档/SPA 回退/theme-init/API/健康端点/媒体 404，断言单值与两侧 CSP 精确文本）；管理端点绑定警告用例补 PPROF_ADDR 端点命名断言。CSP 观察期确认闭环：e2e 全量 24 passed / 2 skipped，烟雾脚本 `issues=[]`、播放正常、收紧 CSP 在位。
 
-交付程序：显式暂存本批路径并复核 staged diff 后提交 `feat: add in-process event bus for notifications`，推送 `codex/security-hardening` 并核对本地/远端一致。不得使用 `git add .`，不得 amend、force push 或直接推送 main。
+交付程序：显式暂存本批路径并复核 staged diff 后提交 `fix(security): single-value security headers on proxied responses`，推送 `codex/security-hardening` 并核对本地/远端一致。不得使用 `git add .`，不得 amend、force push 或直接推送 main。
 
-## 2. 已完成的实现（本批三工作流）
+## 2. 已完成的实现（批次 27 三工作流）
 
 ### 2.1 A2-2 comments 纵向模块
 
@@ -34,14 +34,14 @@
 
 ## 3. 验证证据边界
 
-2026-09-12 本批证据：
+2026-09-12 批次 28（SEC-03c 收尾）证据：
 
-- 后端：`go test ./... -count=1` 全包通过（含 comments 模块三层测试、main_test 警告边界、notifications 模块镜像 INSERT 集成用例）；`go vet ./...`、`gofmt -l` 通过；架构守卫 `TestModulesDoNotImportCoreLayers` 通过（模块生产代码零反向依赖）。
-- 前端：`npx tsc -b` 0 错误；vitest 全量通过（AuthPage 文件 5 项含 AuthRedirect 3 用例）。
-- E2E 全量回归（对重建后的 backend+frontend 运行栈）：**12 passed / 2 skipped**——评论旅程、跨用户通知旅程（真实 MP4 上传→转码→评论→通知→全部已读）在 comments 模块迁移后的后端上全部通过。
-- CSP 运行态：重建后实测响应头为收紧后的 CSP；烟雾 `issues=[]` 零违规、`cards=8`、有效视频播放正常。
-- 复审：comments 模块由总控逐行比对（agent 两次启动失败：模型请求失败 + captcha，已降级为总控复审并留痕）；CSP/E2E 由复审 agent 结论「可提交，无 P0/P1」。
-- QA 发现的产品疑点（`/auth?next` 竞态）本批已修复。遗留：库中既有损坏测试视频（历史 E2E 残留）待清理；E2E 评论对象不筛 processing 状态（P3）。
+- 修复前实测：前端源 `:8088` 上 `/api/v1/videos`、`/healthz` 每个安全头两份（deny-all CSP + SPA CSP 并存）；网关 `:8443` 上 `/api/v1/videos` CSP 两份（四项非 CSP 头经网关 hide+re-add 已单份）。
+- 修复后实测：前端源 `/`、`/upload`（SPA 回退）、`/theme-init.js`（含 `Cache-Control: no-cache`）、`/api/v1/videos`（deny-all CSP）、`/healthz` 各头恰一份，`Server: nginx` 无版本号；网关 `/`、`/api/v1/videos` 各头恰一份，`/gateway-healthz` 保持网关自产四头。
+- 后端：`go test ./... -count=1` 全包通过（含 main_test 新增 PPROF_ADDR 命名断言）。
+- E2E 全量回归（重建后的 frontend 运行栈）：**24 passed / 2 skipped**——新增 `security-headers.spec.ts` 六类响应断言全过（2 项目 × 6）。
+- 烟雾：`issues=[]` 零违规、`cards=27`、有效视频播放正常、收紧 CSP 头在位——SEC-03c「CSP 观察期确认无回归」闭环。
+- 批次 27 证据（存档）：后端全包测试、`go vet`、`gofmt`、架构守卫通过；e2e 12 passed / 2 skipped；复审降级为总控逐行比对（agent 两次启动失败留痕）。
 
 ## 4. 已完成队列
 
@@ -71,15 +71,13 @@
 24. `SEC-03c`：CSP 收紧（去 `unsafe-inline`/`data:`）与管理端点警告边界用例。本批。
 25. `FIX-01`：`/auth?next` 注册竞态修复（AuthRedirect）与真实 MP4 E2E 夹具治理。
 26. `A2-3`：interactions 纵向模块（Toggle 三方法迁移、通知镜像写、消费方查询、三层测试）。本批。
-27. `A2-4`：进程内事件总线（platform/bus 类型化同步分发、notifications 写所有者迁移、comments/interactions 改事件发布、三份镜像 INSERT 消除）。本批。
+27. `A2-4`：进程内事件总线（platform/bus 类型化同步分发、notifications 写所有者迁移、comments/interactions 改事件发布、三份镜像 INSERT 消除）。
+28. `SEC-03c`：CSP 收尾——前端源代理路径重复安全头修复（SPA 头集收敛到文档 location、代理纯透传后端单份头）、e2e 安全头 spec 六类断言、管理端点警告 PPROF 命名用例、CSP 观察期确认（e2e + 烟雾零违规）。本批。
 
 ## 5. 当前任务与后续队列
 
 本周期交付后，后续队列（按优先级）：
 
-- `A2-3`：interactions 纵向模块（like/favorite/follow 端点迁移；注意 follow 的通知写路径与 comments 同模式）。
-- `A2-4`：进程内事件总线——统一 notifications 写路径（删除 comments 模块镜像 INSERT 与核心 CreateNotification 的双份），随后核心 service_test 的通知断言归位模块。
-- `SEC-03c`（可选收尾）：CSP 剩余项（`style-src` 已收紧完毕；观察期后确认无回归）；nginx 头行为与警告用例的补充覆盖。
 - `SEC-04b`（可选收尾）：配额可观测性（超配额计数指标/Runbook）、字幕字节计量、`processing` 卡死时的人工释放流程。
 - `SEC-05b`：frontend/nginx 容器降权（nginx-unprivileged，涉及端口映射变更与运行态演练）。
 - 环境治理：清理开发库中的历史 E2E 残留损坏视频（需停服 SQL 维护窗口或逐 owner API 删除）。
@@ -100,6 +98,16 @@
 - 静态门禁：`scripts/check.ps1`、`go test ./... -count=1`、`go vet`、`gofmt`、`git diff --check` 通过。
 - 行为保持：同步分发（订阅者在发布方 goroutine 内联）、自评抑制与空值防护随迁、通知失败仅告警不影响主流程。
 - Git 交付顺序：显式暂存上述路径，复核 `git diff --cached --check` 与 staged diff，提交 `feat: add in-process event bus for notifications`，推送当前开发分支并核对本地/远端一致。
+- 不创建自动守护任务；本批工作在当前会话内完成交付。
+
+## 6.2 2026-09-12 SEC-03c 收尾交付点
+
+- 分支：`codex/security-hardening`（承接 A2-4 后的 `5203374`）。
+- 修改/新增文件：`frontend/nginx.conf`（SPA 头集收敛到 `location /` 与 `location = /theme-init.js`，代理 location 纯透传）、`frontend/e2e/security-headers.spec.ts`（新增六类响应头断言）、`backend/cmd/server/main_test.go`（PPROF_ADDR 命名断言）、`CHANGELOG.md`、`docs/deployment.md`、本文件。
+- 行为保持：后端 deny-all CSP 继续随 API/媒体响应下发；`theme-init.js` 的 no-cache 重校验语义不变；网关模板未改动（其 hide+re-add 行为与本修复组合后全链路单值）。
+- 静态门禁：`scripts/check.ps1`、`git diff --check` 通过；运行态验证见 §3。
+- 复审：独立只读复审 A-F 六项全部通过，结论「可提交」；一条 P2 观察项留痕——代理 location 上 nginx 自产错误响应（>524m 的 413、后端不可达的 502/504）修复后不再携带安全头（修复前由 server 级 `add_header always` 覆盖），经网关时四项非 CSP 头由边缘补齐、仅 CSP 缺失，直连前端源仅限开发内网，属防御纵深轻微收窄，留待后续批次评估。
+- Git 交付顺序：显式暂存上述路径，复核 `git diff --cached --check` 与 staged diff，提交 `fix(security): single-value security headers on proxied responses`，推送当前开发分支并核对本地/远端一致。
 - 不创建自动守护任务；本批工作在当前会话内完成交付。
 
 ## 7. 最终门禁与 Git
