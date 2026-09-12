@@ -18,6 +18,7 @@ import (
 	"gvideo/backend/internal/httpapi"
 	"gvideo/backend/internal/media"
 	"gvideo/backend/internal/modules/comments"
+	"gvideo/backend/internal/modules/interactions"
 	"gvideo/backend/internal/modules/moderation"
 	"gvideo/backend/internal/modules/notifications"
 	"gvideo/backend/internal/platform"
@@ -69,8 +70,9 @@ func main() {
 	moderationService := moderation.NewService(moderation.NewRepository(db))
 	notificationsService := notifications.NewService(notifications.NewRepository(db))
 	commentsService := comments.NewService(comments.NewRepository(db), logger)
+	interactionsService := interactions.NewService(interactions.NewRepository(db), logger)
 	registry := metrics.New()
-	handler := httpapi.New(svc, moderationService, notificationsService, commentsService, cfg, logger, registry).WithReadiness(platformhealth.NewReadiness(db))
+	handler := httpapi.New(svc, moderationService, notificationsService, commentsService, interactionsService, cfg, logger, registry).WithReadiness(platformhealth.NewReadiness(db))
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           handler.Routes(),

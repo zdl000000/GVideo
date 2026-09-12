@@ -68,16 +68,3 @@ func (h *Handler) creatorVideos(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, r, http.StatusOK, result)
 }
-
-func (h *Handler) toggleFollow(w http.ResponseWriter, r *http.Request) {
-	id, ok := userPathID(w, r)
-	if !ok {
-		return
-	}
-	active, err := h.service.ToggleFollow(r.Context(), sessionFrom(r.Context()).User.ID, id)
-	if err != nil {
-		h.writeError(w, r, err)
-		return
-	}
-	writeJSON(w, r, http.StatusOK, map[string]bool{"active": active})
-}

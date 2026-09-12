@@ -9,6 +9,7 @@ import (
 
 	"gvideo/backend/internal/domain"
 	"gvideo/backend/internal/modules/comments"
+	"gvideo/backend/internal/modules/interactions"
 	"gvideo/backend/internal/platform"
 )
 
@@ -65,14 +66,10 @@ func TestVideoInteractions(t *testing.T) {
 		t.Fatalf("expected duplicate subtitle error, got %v", err)
 	}
 
-	active, err := repo.ToggleLike(ctx, user.ID, video.ID)
-	if err != nil || !active {
-		t.Fatalf("toggle like on: active=%v err=%v", active, err)
-	}
-	active, err = repo.ToggleLike(ctx, user.ID, video.ID)
-	if err != nil || active {
-		t.Fatalf("toggle like off: active=%v err=%v", active, err)
-	}
+	// The like toggle assertions of this scenario moved to
+	// internal/modules/interactions/repository_test.go
+	// (TestToggleLikeAndFavoritePersistence) together with the interactions
+	// feature; media processing, subtitles, and sessions stay core concerns.
 	comment, err := comments.NewRepository(db).CreateComment(ctx, user.ID, video.ID, "useful")
 	if err != nil || comment.Content != "useful" {
 		t.Fatalf("create comment: %#v err=%v", comment, err)
@@ -115,14 +112,15 @@ func TestFavoriteVideosAreFilteredAndSortedByFavoriteTime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.ToggleFavorite(ctx, user.ID, first.ID); err != nil {
+	interactionsRepo := interactions.NewRepository(db)
+	if _, err := interactionsRepo.ToggleFavorite(ctx, user.ID, first.ID); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(1100 * time.Millisecond)
-	if _, err := repo.ToggleFavorite(ctx, user.ID, second.ID); err != nil {
+	if _, err := interactionsRepo.ToggleFavorite(ctx, user.ID, second.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.ToggleFavorite(ctx, user.ID, private.ID); err != nil {
+	if _, err := interactionsRepo.ToggleFavorite(ctx, user.ID, private.ID); err != nil {
 		t.Fatal(err)
 	}
 	items, err := repo.ListVideos(ctx, domain.VideoFilter{FavoriteUserID: user.ID, Limit: 10}, user.ID)
@@ -410,7 +408,8 @@ func TestCreatorProfilesFollowToggleAndFollowingVideos(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	active, err := repo.ToggleFollow(ctx, viewer.ID, author.ID)
+	interactionsRepo := interactions.NewRepository(db)
+	active, err := interactionsRepo.ToggleFollow(ctx, viewer.ID, author.ID)
 	if err != nil || !active {
 		t.Fatalf("toggle follow on: active=%v err=%v", active, err)
 	}
@@ -441,7 +440,7 @@ func TestCreatorProfilesFollowToggleAndFollowingVideos(t *testing.T) {
 		t.Fatalf("following video count=%d err=%v", count, err)
 	}
 
-	active, err = repo.ToggleFollow(ctx, viewer.ID, author.ID)
+	active, err = interactionsRepo.ToggleFollow(ctx, viewer.ID, author.ID)
 	if err != nil || active {
 		t.Fatalf("toggle follow off: active=%v err=%v", active, err)
 	}
@@ -523,14 +522,15 @@ UPDATE videos SET views_count = CASE id WHEN ? THEN 10 WHEN ? THEN 20 ELSE 30 EN
 	if _, err := db.ExecContext(ctx, `UPDATE videos SET processing_status = 'ready' WHERE id = ?`, publicVideo.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.ToggleFollow(ctx, viewer.ID, owner.ID); err != nil {
+	interactionsRepo := interactions.NewRepository(db)
+	if _, err := interactionsRepo.ToggleFollow(ctx, viewer.ID, owner.ID); err != nil {
 		t.Fatal(err)
 	}
 	for _, videoID := range []int64{publicVideo.ID, unlistedVideo.ID, privateVideo.ID} {
-		if _, err := repo.ToggleLike(ctx, viewer.ID, videoID); err != nil {
+		if _, err := interactionsRepo.ToggleLike(ctx, viewer.ID, videoID); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := repo.ToggleFavorite(ctx, viewer.ID, videoID); err != nil {
+		if _, err := interactionsRepo.ToggleFavorite(ctx, viewer.ID, videoID); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := comments.NewRepository(db).CreateComment(ctx, viewer.ID, videoID, "comment"); err != nil {

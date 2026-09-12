@@ -85,25 +85,3 @@ func (s *Service) CreatorStats(ctx context.Context, userID int64) (domain.Creato
 	}
 	return stats, nil
 }
-
-func (s *Service) ToggleFollow(ctx context.Context, followerID, followedID int64) (bool, error) {
-	if followerID <= 0 || followedID <= 0 {
-		return false, domain.ErrInvalidInput
-	}
-	if followerID == followedID {
-		return false, domain.ErrForbidden
-	}
-	if _, err := s.repo.UserByID(ctx, followedID); err != nil {
-		return false, err
-	}
-	active, err := s.repo.ToggleFollow(ctx, followerID, followedID)
-	if err != nil {
-		return false, err
-	}
-	if active {
-		if err := s.repo.CreateNotification(ctx, followedID, followerID, "follow", 0, 0, "", ""); err != nil {
-			s.logger.Warn("create follow notification", "recipient_id", followedID, "actor_id", followerID, "error", err)
-		}
-	}
-	return active, nil
-}

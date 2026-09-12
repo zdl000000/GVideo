@@ -8,12 +8,11 @@ import (
 	"path/filepath"
 	"testing"
 
-	"gvideo/backend/internal/config"
 	"gvideo/backend/internal/domain"
 	"gvideo/backend/internal/modules/comments"
+	"gvideo/backend/internal/modules/interactions"
 	"gvideo/backend/internal/platform"
 	"gvideo/backend/internal/repository"
-	"gvideo/backend/internal/service"
 )
 
 func TestServiceValidationAndDelegation(t *testing.T) {
@@ -74,10 +73,9 @@ func (s *serviceRepositoryStub) MarkAllNotificationsRead(_ context.Context, user
 	return nil
 }
 
-// Core interaction and follow flows keep writing notifications through the
-// core repository (cross-cutting write path); comment notifications are now
-// written by the comments module's mirrored INSERT. This test pins both to the
-// module read side.
+// Interaction, follow, and comment flows write notifications through their
+// modules' mirrored INSERTs (the core write path stays until the event bus
+// lands). This test pins them to the module read side.
 func TestInteractionNotificationsAndSelfSuppression(t *testing.T) {
 	dir := t.TempDir()
 	db, err := platform.OpenDatabase(filepath.Join(dir, "notifications.db"))
@@ -86,8 +84,9 @@ func TestInteractionNotificationsAndSelfSuppression(t *testing.T) {
 	}
 	defer db.Close()
 	repo := repository.New(db)
-	core := service.New(repo, config.Config{MediaDir: filepath.Join(dir, "media")}, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	commentSvc := comments.NewService(comments.NewRepository(db), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	commentSvc := comments.NewService(comments.NewRepository(db), logger)
+	interactionsSvc := interactions.NewService(interactions.NewRepository(db), logger)
 	svc := NewService(NewRepository(db))
 	ctx := context.Background()
 	owner, err := repo.CreateUser(ctx, "notification_owner", "hash")
@@ -106,13 +105,13 @@ func TestInteractionNotificationsAndSelfSuppression(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if active, err := core.ToggleFollow(ctx, actor.ID, owner.ID); err != nil || !active {
+	if active, err := interactionsSvc.ToggleFollow(ctx, actor.ID, owner.ID); err != nil || !active {
 		t.Fatalf("follow: active=%v err=%v", active, err)
 	}
-	if active, err := core.ToggleLike(ctx, actor.ID, video.ID); err != nil || !active {
+	if active, err := interactionsSvc.ToggleLike(ctx, actor.ID, video.ID); err != nil || !active {
 		t.Fatalf("like: active=%v err=%v", active, err)
 	}
-	if active, err := core.ToggleFavorite(ctx, actor.ID, video.ID); err != nil || !active {
+	if active, err := interactionsSvc.ToggleFavorite(ctx, actor.ID, video.ID); err != nil || !active {
 		t.Fatalf("favorite: active=%v err=%v", active, err)
 	}
 	comment, err := commentSvc.CreateComment(ctx, actor.ID, video.ID, "service notification comment")
@@ -139,19 +138,19 @@ func TestInteractionNotificationsAndSelfSuppression(t *testing.T) {
 		t.Fatalf("comment notification = %#v", types["comment"])
 	}
 
-	if active, err := core.ToggleFollow(ctx, actor.ID, owner.ID); err != nil || active {
+	if active, err := interactionsSvc.ToggleFollow(ctx, actor.ID, owner.ID); err != nil || active {
 		t.Fatalf("unfollow: active=%v err=%v", active, err)
 	}
-	if active, err := core.ToggleLike(ctx, actor.ID, video.ID); err != nil || active {
+	if active, err := interactionsSvc.ToggleLike(ctx, actor.ID, video.ID); err != nil || active {
 		t.Fatalf("unlike: active=%v err=%v", active, err)
 	}
-	if active, err := core.ToggleFavorite(ctx, actor.ID, video.ID); err != nil || active {
+	if active, err := interactionsSvc.ToggleFavorite(ctx, actor.ID, video.ID); err != nil || active {
 		t.Fatalf("unfavorite: active=%v err=%v", active, err)
 	}
-	if _, err := core.ToggleLike(ctx, owner.ID, video.ID); err != nil {
+	if _, err := interactionsSvc.ToggleLike(ctx, owner.ID, video.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := core.ToggleFavorite(ctx, owner.ID, video.ID); err != nil {
+	if _, err := interactionsSvc.ToggleFavorite(ctx, owner.ID, video.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := commentSvc.CreateComment(ctx, owner.ID, video.ID, "owner comment"); err != nil {

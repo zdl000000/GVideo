@@ -1,10 +1,7 @@
 package repository
 
 import (
-	"context"
 	"database/sql"
-	"errors"
-	"fmt"
 	"strings"
 
 	"gvideo/backend/internal/domain"
@@ -13,31 +10,6 @@ import (
 type Repository struct{ db *sql.DB }
 
 func New(db *sql.DB) *Repository { return &Repository{db: db} }
-
-func (r *Repository) ToggleFollow(ctx context.Context, followerID, followedID int64) (bool, error) {
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return false, fmt.Errorf("begin follow toggle: %w", err)
-	}
-	defer tx.Rollback()
-	var exists int
-	err = tx.QueryRowContext(ctx, `SELECT 1 FROM user_follows WHERE follower_id = ? AND followed_id = ?`, followerID, followedID).Scan(&exists)
-	active := false
-	if errors.Is(err, sql.ErrNoRows) {
-		if _, err = tx.ExecContext(ctx, `INSERT INTO user_follows(follower_id, followed_id) VALUES (?, ?)`, followerID, followedID); err != nil {
-			return false, fmt.Errorf("follow user: %w", err)
-		}
-		active = true
-	} else if err != nil {
-		return false, fmt.Errorf("read follow: %w", err)
-	} else if _, err = tx.ExecContext(ctx, `DELETE FROM user_follows WHERE follower_id = ? AND followed_id = ?`, followerID, followedID); err != nil {
-		return false, fmt.Errorf("unfollow user: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return false, fmt.Errorf("commit follow toggle: %w", err)
-	}
-	return active, nil
-}
 
 const videoSelect = `
 SELECT v.id, v.user_id, u.username, u.avatar_path, v.title, v.description, v.category, v.visibility, v.video_path, v.hls_master_path, v.cover_path,

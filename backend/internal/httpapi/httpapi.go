@@ -20,6 +20,7 @@ import (
 	"gvideo/backend/internal/config"
 	"gvideo/backend/internal/domain"
 	"gvideo/backend/internal/modules/comments"
+	"gvideo/backend/internal/modules/interactions"
 	"gvideo/backend/internal/modules/moderation"
 	"gvideo/backend/internal/modules/notifications"
 	"gvideo/backend/internal/platform/metrics"
@@ -41,6 +42,7 @@ type Handler struct {
 	moderation    *moderation.Handler
 	notifications *notifications.Handler
 	comments      *comments.Handler
+	interactions  *interactions.Handler
 	readiness     ReadinessChecker
 	cfg           config.Config
 	logger        *slog.Logger
@@ -54,7 +56,7 @@ type response struct {
 	RequestID string `json:"request_id"`
 }
 
-func New(service *service.Service, moderationService *moderation.Service, notificationsService *notifications.Service, commentsService *comments.Service, cfg config.Config, logger *slog.Logger, registries ...*metrics.Registry) *Handler {
+func New(service *service.Service, moderationService *moderation.Service, notificationsService *notifications.Service, commentsService *comments.Service, interactionsService *interactions.Service, cfg config.Config, logger *slog.Logger, registries ...*metrics.Registry) *Handler {
 	var registry *metrics.Registry
 	if len(registries) > 0 {
 		registry = registries[0]
@@ -71,6 +73,7 @@ func New(service *service.Service, moderationService *moderation.Service, notifi
 	h.moderation = moderation.NewHandler(moderationService, moderationHTTPPort{handler: h})
 	h.notifications = notifications.NewHandler(notificationsService, notificationsHTTPPort{handler: h})
 	h.comments = comments.NewHandler(commentsService, commentsHTTPPort{handler: h})
+	h.interactions = interactions.NewHandler(interactionsService, interactionsHTTPPort{handler: h})
 	return h
 }
 
@@ -124,8 +127,8 @@ func (h *Handler) Routes() http.Handler {
 		api.With(h.requireAuth, h.requireCSRF, h.rateLimit("upload", rateLimitUser)).Post("/videos/{videoID}/subtitles", h.uploadSubtitle)
 		api.With(h.requireAuth, h.requireCSRF).Patch("/videos/{videoID}/subtitles/{subtitleID}/default", h.setDefaultSubtitle)
 		api.With(h.requireAuth, h.requireCSRF).Delete("/videos/{videoID}/subtitles/{subtitleID}", h.deleteSubtitle)
-		api.With(h.requireAuth, h.requireCSRF).Post("/videos/{videoID}/like", h.toggleLike)
-		api.With(h.requireAuth, h.requireCSRF).Post("/videos/{videoID}/favorite", h.toggleFavorite)
+		api.With(h.requireAuth, h.requireCSRF).Post("/videos/{videoID}/like", h.interactions.Like)
+		api.With(h.requireAuth, h.requireCSRF).Post("/videos/{videoID}/favorite", h.interactions.Favorite)
 		api.With(h.requireAuth, h.requireCSRF).Post("/videos/{videoID}/reports", h.moderation.ReportVideo)
 		api.With(h.requireAuth, h.requireCSRF, h.rateLimit("comment", rateLimitUser)).Post("/videos/{videoID}/comments", h.comments.Create)
 		api.With(h.requireAuth, h.requireCSRF).Delete("/videos/{videoID}/comments/{commentID}", h.comments.Delete)
@@ -134,7 +137,7 @@ func (h *Handler) Routes() http.Handler {
 		api.With(h.requireAuth).Get("/me/favorites", h.favoriteVideos)
 		api.Get("/users/{userID}", h.getCreator)
 		api.Get("/users/{userID}/videos", h.creatorVideos)
-		api.With(h.requireAuth, h.requireCSRF).Post("/users/{userID}/follow", h.toggleFollow)
+		api.With(h.requireAuth, h.requireCSRF).Post("/users/{userID}/follow", h.interactions.Follow)
 	})
 	return router
 }
@@ -432,4 +435,25 @@ func (p commentsHTTPPort) CommentID(w http.ResponseWriter, r *http.Request) (int
 		return 0, false
 	}
 	return id, true
+}
+
+// interactionsHTTPPort adapts application HTTP concerns without exposing the
+// httpapi package to the interactions module.
+type interactionsHTTPPort struct{ handler *Handler }
+
+func (p interactionsHTTPPort) Principal(ctx context.Context) interactions.Principal {
+	session := sessionFrom(ctx)
+	return interactions.Principal{UserID: session.User.ID}
+}
+func (p interactionsHTTPPort) WriteJSON(w http.ResponseWriter, r *http.Request, status int, data any) {
+	writeJSON(w, r, status, data)
+}
+func (p interactionsHTTPPort) WriteError(w http.ResponseWriter, r *http.Request, err error) {
+	p.handler.writeError(w, r, err)
+}
+func (p interactionsHTTPPort) VideoID(w http.ResponseWriter, r *http.Request) (int64, bool) {
+	return pathID(w, r)
+}
+func (p interactionsHTTPPort) UserID(w http.ResponseWriter, r *http.Request) (int64, bool) {
+	return userPathID(w, r)
 }

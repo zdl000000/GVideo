@@ -120,44 +120,11 @@ func TestChangePasswordKeepsCurrentSessionAndRevokesOthers(t *testing.T) {
 	}
 }
 
-func TestCreatorProfileAndFollowRules(t *testing.T) {
-	dir := t.TempDir()
-	db, err := platform.OpenDatabase(filepath.Join(dir, "test.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	repo := repository.New(db)
-	svc := New(repo, config.Config{SessionTTL: time.Hour, MediaDir: filepath.Join(dir, "media")}, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	ctx := context.Background()
-	follower, err := repo.CreateUser(ctx, "service_follower", "hash")
-	if err != nil {
-		t.Fatal(err)
-	}
-	followed, err := repo.CreateUser(ctx, "service_followed", "hash")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err := svc.ToggleFollow(ctx, follower.ID, follower.ID); err != domain.ErrForbidden {
-		t.Fatalf("self follow error = %v, want forbidden", err)
-	}
-	if _, err := svc.ToggleFollow(ctx, follower.ID, 99999); err != domain.ErrNotFound {
-		t.Fatalf("missing user follow error = %v, want not found", err)
-	}
-	active, err := svc.ToggleFollow(ctx, follower.ID, followed.ID)
-	if err != nil || !active {
-		t.Fatalf("follow user: active=%v err=%v", active, err)
-	}
-	profile, err := svc.CreatorProfile(ctx, followed.ID, follower.ID)
-	if err != nil || !profile.Followed || profile.FollowersCount != 1 {
-		t.Fatalf("creator profile: %#v err=%v", profile, err)
-	}
-	active, err = svc.ToggleFollow(ctx, follower.ID, followed.ID)
-	if err != nil || active {
-		t.Fatalf("unfollow user: active=%v err=%v", active, err)
-	}
-}
+// The follow rules of TestCreatorProfileAndFollowRules moved to
+// internal/modules/interactions/service_test.go
+// (TestPrivateVideoInteractionAndFollowRules) together with the interactions
+// feature; the creator profile read model stays a core concern and keeps HTTP
+// and repository coverage.
 
 func TestUpdateProfileValidationAndAvatarLifecycle(t *testing.T) {
 	dir := t.TempDir()
