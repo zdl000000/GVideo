@@ -9,14 +9,45 @@ import (
 	"gvideo/backend/internal/domain"
 )
 
-// Repository owns the notification read model. Notification creation stays in
-// the core repository because it is a cross-cutting write path.
+// Repository owns the notification read and write model: creation is the
+// single notification write path, fed by the process-internal event bus.
 type Repository struct {
 	db *sql.DB
 }
 
 func NewRepository(db *sql.DB) *Repository {
 	return &Repository{db: db}
+}
+
+// Create 落一条通知（通知写路径的唯一所有者）。收件人无效、类型为空或
+// 自评时静默跳过（不写行、不报错），与历史 CreateNotification 语义一致。
+func (r *Repository) Create(ctx context.Context, recipientID, actorID int64, kind string, videoID, commentID int64, videoTitle, commentPreview string) error {
+	if recipientID <= 0 || kind == "" || recipientID == actorID {
+		return nil
+	}
+	var actorIDValue any
+	if actorID > 0 {
+		actorIDValue = actorID
+	}
+	var videoIDValue any
+	if videoID > 0 {
+		videoIDValue = videoID
+	}
+	var commentIDValue any
+	if commentID > 0 {
+		commentIDValue = commentID
+	}
+	_, err := r.db.ExecContext(ctx, `
+INSERT INTO notifications(
+  recipient_id, actor_id, actor_username, actor_avatar_path, type,
+  video_id, video_title, comment_id, comment_preview)
+SELECT ?, ?, COALESCE(u.username, ''), COALESCE(u.avatar_path, ''), ?, ?, ?, ?, ?
+FROM (SELECT 1) seed LEFT JOIN users u ON u.id = ?`,
+		recipientID, actorIDValue, kind, videoIDValue, videoTitle, commentIDValue, commentPreview, actorIDValue)
+	if err != nil {
+		return fmt.Errorf("create notification: %w", err)
+	}
+	return nil
 }
 
 func (r *Repository) ListNotifications(ctx context.Context, userID int64, page, pageSize int) (domain.NotificationPage, error) {

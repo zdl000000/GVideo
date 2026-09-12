@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"gvideo/backend/internal/domain"
+	"gvideo/backend/internal/modules/notifications"
 	"gvideo/backend/internal/platform"
 	"gvideo/backend/internal/repository"
 )
@@ -122,7 +123,6 @@ func TestMirroredCreateNotificationSuppressesSelfInteractions(t *testing.T) {
 	}
 	defer db.Close()
 	legacy := repository.New(db)
-	repo := NewRepository(db)
 	ctx := context.Background()
 	owner, err := legacy.CreateUser(ctx, "interaction_notify_owner", "hash")
 	if err != nil {
@@ -139,16 +139,16 @@ func TestMirroredCreateNotificationSuppressesSelfInteractions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.createNotification(ctx, owner.ID, actor.ID, "like", video.ID, 0, video.Title, ""); err != nil {
+	if err := notifications.NewRepository(db).Create(ctx, owner.ID, actor.ID, "like", video.ID, 0, video.Title, ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.createNotification(ctx, owner.ID, actor.ID, "favorite", video.ID, 0, video.Title, ""); err != nil {
+	if err := notifications.NewRepository(db).Create(ctx, owner.ID, actor.ID, "favorite", video.ID, 0, video.Title, ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.createNotification(ctx, owner.ID, actor.ID, "follow", 0, 0, "", ""); err != nil {
+	if err := notifications.NewRepository(db).Create(ctx, owner.ID, actor.ID, "follow", 0, 0, "", ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.createNotification(ctx, owner.ID, owner.ID, "like", video.ID, 0, video.Title, "self like"); err != nil {
+	if err := notifications.NewRepository(db).Create(ctx, owner.ID, owner.ID, "like", video.ID, 0, video.Title, "self like"); err != nil {
 		t.Fatal(err)
 	}
 

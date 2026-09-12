@@ -22,6 +22,7 @@ import (
 	"gvideo/backend/internal/modules/moderation"
 	"gvideo/backend/internal/modules/notifications"
 	"gvideo/backend/internal/platform"
+	"gvideo/backend/internal/platform/bus"
 	platformhealth "gvideo/backend/internal/platform/health"
 	"gvideo/backend/internal/platform/metrics"
 	"gvideo/backend/internal/repository"
@@ -68,9 +69,18 @@ func main() {
 	}
 	svc := service.New(repo, cfg, logger)
 	moderationService := moderation.NewService(moderation.NewRepository(db))
-	notificationsService := notifications.NewService(notifications.NewRepository(db))
-	commentsService := comments.NewService(comments.NewRepository(db), logger)
-	interactionsService := interactions.NewService(interactions.NewRepository(db), logger)
+	// 进程内同步事件总线：通知写路径的唯一入口。订阅者与发布方同请求
+	// goroutine 执行，保持「通知随请求落库」的既有语义；写失败仅记录告警。
+	eventBus := bus.New()
+	notificationsRepo := notifications.NewRepository(db)
+	notificationsService := notifications.NewService(notificationsRepo)
+	eventBus.Subscribe(func(ctx context.Context, event bus.NotificationEvent) {
+		if err := notificationsRepo.Create(ctx, event.RecipientID, event.ActorID, event.Kind, event.VideoID, event.CommentID, event.VideoTitle, event.CommentPreview); err != nil {
+			logger.Warn("record notification", "event", "notification_record_failed", "kind", event.Kind, "recipient_id", event.RecipientID, "error", err)
+		}
+	})
+	commentsService := comments.NewService(comments.NewRepository(db), eventBus, logger)
+	interactionsService := interactions.NewService(interactions.NewRepository(db), eventBus, logger)
 	registry := metrics.New()
 	handler := httpapi.New(svc, moderationService, notificationsService, commentsService, interactionsService, cfg, logger, registry).WithReadiness(platformhealth.NewReadiness(db))
 	server := &http.Server{

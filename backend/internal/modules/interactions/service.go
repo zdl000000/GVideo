@@ -5,6 +5,7 @@ import (
 	"log/slog"
 
 	"gvideo/backend/internal/domain"
+	"gvideo/backend/internal/platform/bus"
 )
 
 type interactionRepository interface {
@@ -13,18 +14,32 @@ type interactionRepository interface {
 	ToggleLike(context.Context, int64, int64) (bool, error)
 	ToggleFavorite(context.Context, int64, int64) (bool, error)
 	ToggleFollow(context.Context, int64, int64) (bool, error)
-	createNotification(context.Context, int64, int64, string, int64, int64, string, string) error
+}
+
+// EventPublisher 由消费方定义：互动成功后发布通知事件，写路径统一由
+// notifications 模块的订阅者接管（事件总线为同步分发，nil 时静默跳过）。
+type EventPublisher interface {
+	Publish(ctx context.Context, event bus.NotificationEvent)
 }
 
 // Service owns the interaction toggle rules and the interaction-notification
 // write path.
 type Service struct {
-	repo   interactionRepository
-	logger *slog.Logger
+	repo      interactionRepository
+	publisher EventPublisher
+	logger    *slog.Logger
 }
 
-func NewService(repo interactionRepository, logger *slog.Logger) *Service {
-	return &Service{repo: repo, logger: logger}
+func NewService(repo interactionRepository, publisher EventPublisher, logger *slog.Logger) *Service {
+	return &Service{repo: repo, publisher: publisher, logger: logger}
+}
+
+// publish 在已接入事件总线时同步分发通知事件；nil 发布方（部分测试）静默跳过。
+func (s *Service) publish(ctx context.Context, event bus.NotificationEvent) {
+	if s.publisher == nil {
+		return
+	}
+	s.publisher.Publish(ctx, event)
 }
 
 func (s *Service) ToggleLike(ctx context.Context, userID, videoID int64) (bool, error) {
@@ -37,9 +52,7 @@ func (s *Service) ToggleLike(ctx context.Context, userID, videoID int64) (bool, 
 		return false, err
 	}
 	if active {
-		if err := s.repo.createNotification(ctx, authorID, userID, "like", videoID, 0, videoTitle, ""); err != nil {
-			s.logger.Warn("create like notification", "recipient_id", authorID, "video_id", videoID, "error", err)
-		}
+		s.publish(ctx, bus.NotificationEvent{RecipientID: authorID, ActorID: userID, Kind: "like", VideoID: videoID, VideoTitle: videoTitle})
 	}
 	return active, nil
 }
@@ -54,9 +67,7 @@ func (s *Service) ToggleFavorite(ctx context.Context, userID, videoID int64) (bo
 		return false, err
 	}
 	if active {
-		if err := s.repo.createNotification(ctx, authorID, userID, "favorite", videoID, 0, videoTitle, ""); err != nil {
-			s.logger.Warn("create favorite notification", "recipient_id", authorID, "video_id", videoID, "error", err)
-		}
+		s.publish(ctx, bus.NotificationEvent{RecipientID: authorID, ActorID: userID, Kind: "favorite", VideoID: videoID, VideoTitle: videoTitle})
 	}
 	return active, nil
 }
@@ -76,9 +87,7 @@ func (s *Service) ToggleFollow(ctx context.Context, followerID, followedID int64
 		return false, err
 	}
 	if active {
-		if err := s.repo.createNotification(ctx, followedID, followerID, "follow", 0, 0, "", ""); err != nil {
-			s.logger.Warn("create follow notification", "recipient_id", followedID, "actor_id", followerID, "error", err)
-		}
+		s.publish(ctx, bus.NotificationEvent{RecipientID: followedID, ActorID: followerID, Kind: "follow"})
 	}
 	return active, nil
 }

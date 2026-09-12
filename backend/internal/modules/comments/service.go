@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"gvideo/backend/internal/domain"
+	"gvideo/backend/internal/platform/bus"
 )
 
 type commentRepository interface {
@@ -13,18 +14,32 @@ type commentRepository interface {
 	ListComments(context.Context, int64) ([]domain.Comment, error)
 	CreateComment(context.Context, int64, int64, string) (domain.Comment, error)
 	DeleteComment(context.Context, int64, int64, int64) error
-	createNotification(context.Context, int64, int64, string, int64, int64, string, string) error
+}
+
+// EventPublisher 由消费方定义：评论成功后发布通知事件，写路径统一由
+// notifications 模块的订阅者接管（事件总线为同步分发，nil 时静默跳过）。
+type EventPublisher interface {
+	Publish(ctx context.Context, event bus.NotificationEvent)
 }
 
 // Service owns comment validation, video visibility checks, and the
 // comment-notification write path.
 type Service struct {
-	repo   commentRepository
-	logger *slog.Logger
+	repo      commentRepository
+	publisher EventPublisher
+	logger    *slog.Logger
 }
 
-func NewService(repo commentRepository, logger *slog.Logger) *Service {
-	return &Service{repo: repo, logger: logger}
+func NewService(repo commentRepository, publisher EventPublisher, logger *slog.Logger) *Service {
+	return &Service{repo: repo, publisher: publisher, logger: logger}
+}
+
+// publish 在已接入事件总线时同步分发通知事件；nil 发布方（部分测试）静默跳过。
+func (s *Service) publish(ctx context.Context, event bus.NotificationEvent) {
+	if s.publisher == nil {
+		return
+	}
+	s.publisher.Publish(ctx, event)
 }
 
 func (s *Service) Comments(ctx context.Context, videoID, viewerID int64) ([]domain.Comment, error) {
@@ -47,9 +62,15 @@ func (s *Service) CreateComment(ctx context.Context, userID, videoID int64, cont
 	if err != nil {
 		return domain.Comment{}, err
 	}
-	if err := s.repo.createNotification(ctx, authorID, userID, "comment", videoID, comment.ID, videoTitle, comment.Content); err != nil {
-		s.logger.Warn("create comment notification", "recipient_id", authorID, "video_id", videoID, "error", err)
-	}
+	s.publish(ctx, bus.NotificationEvent{
+		RecipientID:    authorID,
+		ActorID:        userID,
+		Kind:           "comment",
+		VideoID:        videoID,
+		CommentID:      comment.ID,
+		VideoTitle:     videoTitle,
+		CommentPreview: comment.Content,
+	})
 	return comment, nil
 }
 
