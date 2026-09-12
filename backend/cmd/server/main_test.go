@@ -205,8 +205,31 @@ func TestDiagnosticsBindingWarnings(t *testing.T) {
 	if warnings := diagnosticsBindingWarnings("development", "10.1.2.3:9090", ""); len(warnings) != 1 {
 		t.Fatalf("private address warnings = %v, want 1", warnings)
 	}
+	if warnings := diagnosticsBindingWarnings("development", ":9090", ""); len(warnings) != 1 {
+		t.Fatalf("empty-host wildcard warnings = %v, want 1", warnings)
+	}
+	for _, warning := range diagnosticsBindingWarnings("development", "0.0.0.0:9090", "") {
+		if !strings.Contains(warning, "METRICS_ADDR") {
+			t.Fatalf("warning %q does not name the endpoint", warning)
+		}
+	}
 	if warnings := diagnosticsBindingWarnings("development", "", ""); len(warnings) != 0 {
 		t.Fatalf("disabled diagnostics should not warn: %v", warnings)
+	}
+	if warnings := diagnosticsBindingWarnings("development", "metrics.example.com:9090", ""); len(warnings) != 1 {
+		t.Fatalf("hostname bindings warnings = %v, want 1", warnings)
+	}
+	// SplitHostPort fails on addresses without a port, so they are skipped.
+	if warnings := diagnosticsBindingWarnings("development", "127.0.0.1", ""); len(warnings) != 0 {
+		t.Fatalf("missing-port bindings should be skipped: %v", warnings)
+	}
+	// IPv4-mapped IPv6 loopback unmaps to 127.0.0.1 and must not warn.
+	if warnings := diagnosticsBindingWarnings("development", "[::ffff:127.0.0.1]:9090", ""); len(warnings) != 0 {
+		t.Fatalf("IPv4-mapped loopback bindings should not warn: %v", warnings)
+	}
+	// The IPv6 wildcard binds every interface and must warn.
+	if warnings := diagnosticsBindingWarnings("development", "", "[::]:6060"); len(warnings) != 1 {
+		t.Fatalf("IPv6 wildcard bindings warnings = %v, want 1", warnings)
 	}
 }
 

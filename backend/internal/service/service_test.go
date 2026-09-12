@@ -241,7 +241,10 @@ func TestUpdateProfileValidationAndAvatarLifecycle(t *testing.T) {
 	}
 }
 
-func TestPrivateVideoCommentsAndMediaAuthorization(t *testing.T) {
+// The comment authorization assertions of this scenario moved to
+// internal/modules/comments/service_test.go (TestPrivateVideoCommentsAuthorization)
+// together with the comments feature; media authorization stays a core concern.
+func TestPrivateVideoMediaAuthorization(t *testing.T) {
 	dir := t.TempDir()
 	db, err := platform.OpenDatabase(filepath.Join(dir, "test.db"))
 	if err != nil {
@@ -269,21 +272,6 @@ func TestPrivateVideoCommentsAndMediaAuthorization(t *testing.T) {
 		t.Fatal(err)
 	}
 	svc := New(repo, config.Config{MediaDir: filepath.Join(dir, "media")}, slog.New(slog.NewTextHandler(io.Discard, nil)))
-
-	if _, err := svc.Comments(ctx, privateVideo.ID, 0); !errors.Is(err, domain.ErrNotFound) {
-		t.Fatalf("anonymous private comments error = %v, want not found", err)
-	}
-	if _, err := svc.CreateComment(ctx, viewer.ID, privateVideo.ID, "no access"); !errors.Is(err, domain.ErrNotFound) {
-		t.Fatalf("viewer private comment error = %v, want not found", err)
-	}
-	comment, err := svc.CreateComment(ctx, owner.ID, privateVideo.ID, "owner comment")
-	if err != nil || comment.UserID != owner.ID {
-		t.Fatalf("owner private comment = %#v err=%v", comment, err)
-	}
-	comments, err := svc.Comments(ctx, privateVideo.ID, owner.ID)
-	if err != nil || len(comments) != 1 {
-		t.Fatalf("owner private comments = %#v err=%v", comments, err)
-	}
 
 	for _, mediaPath := range []string{
 		"videos/private.mp4", "covers/private.jpg", "subtitles/private/en.vtt", "hls/private/segment-001.ts",

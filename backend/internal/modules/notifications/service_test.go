@@ -10,6 +10,7 @@ import (
 
 	"gvideo/backend/internal/config"
 	"gvideo/backend/internal/domain"
+	"gvideo/backend/internal/modules/comments"
 	"gvideo/backend/internal/platform"
 	"gvideo/backend/internal/repository"
 	"gvideo/backend/internal/service"
@@ -74,8 +75,9 @@ func (s *serviceRepositoryStub) MarkAllNotificationsRead(_ context.Context, user
 }
 
 // Core interaction and follow flows keep writing notifications through the
-// core repository (cross-cutting write path); this test pins that coupling to
-// the module read side.
+// core repository (cross-cutting write path); comment notifications are now
+// written by the comments module's mirrored INSERT. This test pins both to the
+// module read side.
 func TestInteractionNotificationsAndSelfSuppression(t *testing.T) {
 	dir := t.TempDir()
 	db, err := platform.OpenDatabase(filepath.Join(dir, "notifications.db"))
@@ -85,6 +87,7 @@ func TestInteractionNotificationsAndSelfSuppression(t *testing.T) {
 	defer db.Close()
 	repo := repository.New(db)
 	core := service.New(repo, config.Config{MediaDir: filepath.Join(dir, "media")}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	commentSvc := comments.NewService(comments.NewRepository(db), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	svc := NewService(NewRepository(db))
 	ctx := context.Background()
 	owner, err := repo.CreateUser(ctx, "notification_owner", "hash")
@@ -112,7 +115,7 @@ func TestInteractionNotificationsAndSelfSuppression(t *testing.T) {
 	if active, err := core.ToggleFavorite(ctx, actor.ID, video.ID); err != nil || !active {
 		t.Fatalf("favorite: active=%v err=%v", active, err)
 	}
-	comment, err := core.CreateComment(ctx, actor.ID, video.ID, "service notification comment")
+	comment, err := commentSvc.CreateComment(ctx, actor.ID, video.ID, "service notification comment")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +154,7 @@ func TestInteractionNotificationsAndSelfSuppression(t *testing.T) {
 	if _, err := core.ToggleFavorite(ctx, owner.ID, video.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := core.CreateComment(ctx, owner.ID, video.ID, "owner comment"); err != nil {
+	if _, err := commentSvc.CreateComment(ctx, owner.ID, video.ID, "owner comment"); err != nil {
 		t.Fatal(err)
 	}
 	page, err = svc.Notifications(ctx, owner.ID, 1, 20)

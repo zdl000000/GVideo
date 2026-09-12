@@ -28,6 +28,7 @@ import { RouteErrorBoundary } from "./RouteErrorBoundary";
 import type { AuthPayload, User } from "../types";
 
 const AuthPage = lazy(() => import("../features/auth/AuthPage").then((module) => ({ default: module.AuthPage })));
+const AuthRedirect = lazy(() => import("../features/auth/AuthPage").then((module) => ({ default: module.AuthRedirect })));
 const CreatorDashboard = lazy(() => import("../features/creator/CreatorDashboard").then((module) => ({ default: module.CreatorDashboard })));
 const CreatorPage = lazy(() => import("../features/creator/CreatorPage").then((module) => ({ default: module.CreatorPage })));
 const NotificationCenterPage = lazy(() => import("../features/notifications/NotificationCenterPage").then((module) => ({ default: module.NotificationCenterPage })));
@@ -106,7 +107,7 @@ function App() {
         <Route path="favorites" element={<Protected auth={auth}><FavoritesPage /></Protected>} />
         <Route path="users/:id" element={<CreatorPage user={auth.user} onUserUpdated={updateAuthUser} />} />
         <Route path="video/:id" element={<VideoPage user={auth.user} />} />
-        <Route path="auth" element={auth.user ? <Navigate to="/" replace /> : <AuthPage onAuth={applyAuth} />} />
+        <Route path="auth" element={auth.user ? <AuthRedirect /> : <AuthPage onAuth={applyAuth} />} />
         <Route path="upload" element={<Protected auth={auth}><UploadPage /></Protected>} />
         <Route path="me/videos" element={<Protected auth={auth}><MyVideosPage /></Protected>} />
         <Route path="creator" element={<Protected auth={auth}><CreatorDashboard user={auth.user!} /></Protected>} />

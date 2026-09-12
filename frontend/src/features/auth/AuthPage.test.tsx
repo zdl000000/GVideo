@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
-import { AuthPage } from "./AuthPage";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { AuthPage, AuthRedirect } from "./AuthPage";
 
 vi.mock("../../shared/api/client", () => ({
   api: {
@@ -32,5 +32,50 @@ describe("AuthPage", () => {
     await screen.findAllByRole("button", { name: "登录" });
     fireEvent.click(screen.getByRole("button", { name: "注册" }));
     expect(screen.getByRole("button", { name: "创建账号" })).toBeTruthy();
+  });
+});
+
+// 已登录回跳按 next 参数走站内路径，拒绝协议相对与绝对 URL。
+describe("AuthRedirect", () => {
+  afterEach(cleanup);
+
+  it("按 next 参数回跳站内路径", () => {
+    render(
+      <MemoryRouter initialEntries={["/auth?next=/upload"]}>
+        <Routes>
+          <Route path="/auth" element={<AuthRedirect />} />
+          <Route path="/upload" element={<div>上传页</div>} />
+          <Route path="*" element={<div>首页回退</div>} />
+        </Routes>
+      </MemoryRouter>
+    );
+    expect(screen.getByText("上传页")).toBeTruthy();
+    expect(screen.queryByText("首页回退")).toBeNull();
+  });
+
+  it("拒绝协议相对路径的 next，回退首页", () => {
+    render(
+      <MemoryRouter initialEntries={["/auth?next=//evil.example"]}>
+        <Routes>
+          <Route path="/auth" element={<AuthRedirect />} />
+          <Route path="/upload" element={<div>上传页</div>} />
+          <Route path="*" element={<div>首页回退</div>} />
+        </Routes>
+      </MemoryRouter>
+    );
+    expect(screen.getByText("首页回退")).toBeTruthy();
+  });
+
+  it("拒绝绝对 URL 的 next，回退首页", () => {
+    render(
+      <MemoryRouter initialEntries={["/auth?next=https://evil.example"]}>
+        <Routes>
+          <Route path="/auth" element={<AuthRedirect />} />
+          <Route path="/upload" element={<div>上传页</div>} />
+          <Route path="*" element={<div>首页回退</div>} />
+        </Routes>
+      </MemoryRouter>
+    );
+    expect(screen.getByText("首页回退")).toBeTruthy();
   });
 });

@@ -1,13 +1,41 @@
-package repository
+package comments
 
 import (
 	"context"
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
 	"gvideo/backend/internal/domain"
 )
+
+// Repository owns the comment persistence and read model.
+type Repository struct {
+	db *sql.DB
+}
+
+func NewRepository(db *sql.DB) *Repository {
+	return &Repository{db: db}
+}
+
+// VideoAuthorID mirrors the visibility predicate of the core VideoByID query
+// (internal/repository/repository_videos.go) as the consumer-owned lookup the
+// comment flows need; keep the SQL in sync or move both behind a shared helper.
+func (r *Repository) VideoAuthorID(ctx context.Context, videoID, viewerID int64) (int64, string, error) {
+	var authorID int64
+	var title string
+	err := r.db.QueryRowContext(ctx, `
+SELECT user_id, title FROM videos
+WHERE id = ? AND (visibility <> 'private' OR user_id = ?)`, videoID, viewerID).Scan(&authorID, &title)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, "", domain.ErrNotFound
+	}
+	if err != nil {
+		return 0, "", fmt.Errorf("find commentable video: %w", err)
+	}
+	return authorID, title, nil
+}
 
 func (r *Repository) ListComments(ctx context.Context, videoID int64) ([]domain.Comment, error) {
 	rows, err := r.db.QueryContext(ctx, `
@@ -82,4 +110,48 @@ WHERE c.id = ? AND c.video_id = ?`, commentID, videoID).Scan(&commentUserID, &vi
 		return fmt.Errorf("commit delete comment: %w", err)
 	}
 	return nil
+}
+
+// 镜像核心 CreateNotification；事件总线落地后由 notifications 模块统一接管。
+func (r *Repository) createNotification(ctx context.Context, recipientID, actorID int64, notificationType string, videoID, commentID int64, videoTitle, commentPreview string) error {
+	if recipientID <= 0 || notificationType == "" || recipientID == actorID {
+		return nil
+	}
+	var actorIDValue any
+	if actorID > 0 {
+		actorIDValue = actorID
+	}
+	var videoIDValue any
+	if videoID > 0 {
+		videoIDValue = videoID
+	}
+	var commentIDValue any
+	if commentID > 0 {
+		commentIDValue = commentID
+	}
+	_, err := r.db.ExecContext(ctx, `
+INSERT INTO notifications(
+  recipient_id, actor_id, actor_username, actor_avatar_path, type,
+  video_id, video_title, comment_id, comment_preview)
+SELECT ?, ?, COALESCE(u.username, ''), COALESCE(u.avatar_path, ''), ?, ?, ?, ?, ?
+FROM (SELECT 1) seed LEFT JOIN users u ON u.id = ?`,
+		recipientID, actorIDValue, notificationType, videoIDValue, videoTitle, commentIDValue, commentPreview, actorIDValue)
+	if err != nil {
+		return fmt.Errorf("create notification: %w", err)
+	}
+	return nil
+}
+
+// mediaURL/optionalMediaURL mirror the core repository helpers of the same
+// name (internal/repository/repository.go); keep the two in sync or move both
+// behind a shared helper when the media prefix logic changes.
+func mediaURL(path string) string {
+	return "/media/" + strings.ReplaceAll(path, `\`, "/")
+}
+
+func optionalMediaURL(path string) string {
+	if path == "" {
+		return ""
+	}
+	return mediaURL(path)
 }

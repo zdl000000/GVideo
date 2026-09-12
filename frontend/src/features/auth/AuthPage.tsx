@@ -1,10 +1,19 @@
 import { FormEvent, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../../shared/api/client";
 import { errorMessage } from "../../shared/lib/errors";
 import type { AuthPayload } from "../../types";
 
 type AuthMode = "login" | "register";
+
+// 已登录访问 /auth 时按 next 回跳。仅接受站内相对路径（拒绝 // 与绝对
+// URL），防开放重定向；注册/登录成功后的跳转与该回跳指向一致，竞态无害。
+export function AuthRedirect() {
+  const [params] = useSearchParams();
+  const next = params.get("next");
+  const target = next && next.startsWith("/") && !next.startsWith("//") ? next : "/";
+  return <Navigate to={target} replace />;
+}
 
 export function AuthPage({ onAuth }: { onAuth: (payload: AuthPayload) => void }) {
   const [params] = useSearchParams();

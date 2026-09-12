@@ -19,6 +19,7 @@ import (
 
 	"gvideo/backend/internal/config"
 	"gvideo/backend/internal/domain"
+	"gvideo/backend/internal/modules/comments"
 	"gvideo/backend/internal/modules/moderation"
 	"gvideo/backend/internal/modules/notifications"
 	"gvideo/backend/internal/platform/metrics"
@@ -39,6 +40,7 @@ type Handler struct {
 	service       *service.Service
 	moderation    *moderation.Handler
 	notifications *notifications.Handler
+	comments      *comments.Handler
 	readiness     ReadinessChecker
 	cfg           config.Config
 	logger        *slog.Logger
@@ -52,7 +54,7 @@ type response struct {
 	RequestID string `json:"request_id"`
 }
 
-func New(service *service.Service, moderationService *moderation.Service, notificationsService *notifications.Service, cfg config.Config, logger *slog.Logger, registries ...*metrics.Registry) *Handler {
+func New(service *service.Service, moderationService *moderation.Service, notificationsService *notifications.Service, commentsService *comments.Service, cfg config.Config, logger *slog.Logger, registries ...*metrics.Registry) *Handler {
 	var registry *metrics.Registry
 	if len(registries) > 0 {
 		registry = registries[0]
@@ -68,6 +70,7 @@ func New(service *service.Service, moderationService *moderation.Service, notifi
 	}
 	h.moderation = moderation.NewHandler(moderationService, moderationHTTPPort{handler: h})
 	h.notifications = notifications.NewHandler(notificationsService, notificationsHTTPPort{handler: h})
+	h.comments = comments.NewHandler(commentsService, commentsHTTPPort{handler: h})
 	return h
 }
 
@@ -113,7 +116,7 @@ func (h *Handler) Routes() http.Handler {
 
 		api.Get("/videos", h.listVideos)
 		api.Get("/videos/{videoID}", h.getVideo)
-		api.Get("/videos/{videoID}/comments", h.listComments)
+		api.Get("/videos/{videoID}/comments", h.comments.List)
 		api.With(h.requireAuth, h.requireCSRF, h.rateLimit("upload", rateLimitUser)).Post("/videos", h.uploadVideo)
 		api.With(h.requireAuth, h.requireCSRF).Patch("/videos/{videoID}", h.updateVideo)
 		api.With(h.requireAuth, h.requireCSRF).Delete("/videos/{videoID}", h.deleteVideo)
@@ -124,8 +127,8 @@ func (h *Handler) Routes() http.Handler {
 		api.With(h.requireAuth, h.requireCSRF).Post("/videos/{videoID}/like", h.toggleLike)
 		api.With(h.requireAuth, h.requireCSRF).Post("/videos/{videoID}/favorite", h.toggleFavorite)
 		api.With(h.requireAuth, h.requireCSRF).Post("/videos/{videoID}/reports", h.moderation.ReportVideo)
-		api.With(h.requireAuth, h.requireCSRF, h.rateLimit("comment", rateLimitUser)).Post("/videos/{videoID}/comments", h.createComment)
-		api.With(h.requireAuth, h.requireCSRF).Delete("/videos/{videoID}/comments/{commentID}", h.deleteComment)
+		api.With(h.requireAuth, h.requireCSRF, h.rateLimit("comment", rateLimitUser)).Post("/videos/{videoID}/comments", h.comments.Create)
+		api.With(h.requireAuth, h.requireCSRF).Delete("/videos/{videoID}/comments/{commentID}", h.comments.Delete)
 		api.With(h.requireAuth).Get("/me/videos", h.myVideos)
 		api.With(h.requireAuth).Get("/me/following/videos", h.followingVideos)
 		api.With(h.requireAuth).Get("/me/favorites", h.favoriteVideos)
@@ -400,4 +403,33 @@ func (p notificationsHTTPPort) NotificationID(w http.ResponseWriter, r *http.Req
 }
 func (p notificationsHTTPPort) Pagination(r *http.Request, defaultSize int) (int, int) {
 	return pagination(r, defaultSize)
+}
+
+// commentsHTTPPort adapts application HTTP concerns without exposing the
+// httpapi package to the comments module.
+type commentsHTTPPort struct{ handler *Handler }
+
+func (p commentsHTTPPort) Principal(ctx context.Context) comments.Principal {
+	session := sessionFrom(ctx)
+	return comments.Principal{UserID: session.User.ID}
+}
+func (p commentsHTTPPort) DecodeJSON(w http.ResponseWriter, r *http.Request, target any) bool {
+	return decodeJSON(w, r, target)
+}
+func (p commentsHTTPPort) WriteJSON(w http.ResponseWriter, r *http.Request, status int, data any) {
+	writeJSON(w, r, status, data)
+}
+func (p commentsHTTPPort) WriteError(w http.ResponseWriter, r *http.Request, err error) {
+	p.handler.writeError(w, r, err)
+}
+func (p commentsHTTPPort) VideoID(w http.ResponseWriter, r *http.Request) (int64, bool) {
+	return pathID(w, r)
+}
+func (p commentsHTTPPort) CommentID(w http.ResponseWriter, r *http.Request) (int64, bool) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "commentID"), 10, 64)
+	if err != nil || id <= 0 {
+		writeProblem(w, r, http.StatusBadRequest, "无效的评论编号")
+		return 0, false
+	}
+	return id, true
 }
