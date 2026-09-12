@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"gvideo/backend/internal/domain"
+	"gvideo/backend/internal/modules/comments"
 	"gvideo/backend/internal/platform"
 	"gvideo/backend/internal/repository"
 )
@@ -39,7 +40,7 @@ func TestNotificationsLifecycleAndOwnership(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	comment, err := legacy.CreateComment(ctx, actor.ID, video.ID, "notification comment")
+	comment, err := comments.NewRepository(db).CreateComment(ctx, actor.ID, video.ID, "notification comment")
 	if err != nil {
 		t.Fatal(err)
 	}

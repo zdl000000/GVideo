@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"gvideo/backend/internal/config"
+	"gvideo/backend/internal/modules/comments"
 	"gvideo/backend/internal/modules/moderation"
 	"gvideo/backend/internal/modules/notifications"
 	"gvideo/backend/internal/platform"
@@ -36,7 +37,7 @@ func TestUploadQuotaReturnsRequestEntityTooLarge(t *testing.T) {
 		UserStorageQuotaBytes: int64(len(quotaTestMP4)) + 5,
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	handler := New(service.New(repository.New(db), cfg, logger), moderation.NewService(moderation.NewRepository(db)), notifications.NewService(notifications.NewRepository(db)), cfg, logger).Routes()
+	handler := New(service.New(repository.New(db), cfg, logger), moderation.NewService(moderation.NewRepository(db)), notifications.NewService(notifications.NewRepository(db)), comments.NewService(comments.NewRepository(db), logger), cfg, logger).Routes()
 	user := registerTestUser(t, handler, "quota_http_user")
 
 	upload := func(title string) *httptest.ResponseRecorder {

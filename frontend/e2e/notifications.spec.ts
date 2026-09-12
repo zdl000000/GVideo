@@ -7,8 +7,9 @@ test.setTimeout(120_000);
 
 const PASSWORD = "password123";
 
-// 与后端上传测试夹具一致的最小 MP4 签名（标准库 MIME 嗅探可识别）
-const MINIMAL_MP4 = Buffer.from("\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom<\x06t\xbfmdat", "latin1");
+// 真实 MP4 夹具（后端容器内 ffmpeg 生成，1 秒 320x240，可正常转码）：
+// 假签名文件会转码失败并在环境库中留下损坏视频卡片。
+const FIXTURE_MP4 = "e2e/fixtures/sample.mp4";
 
 function uniqueSuffix() {
   return Math.random().toString(36).slice(2, 6).padEnd(4, "0");
@@ -86,11 +87,7 @@ test("uploader receives the commenter's notification and can mark all read", asy
   const categorySelect = page.getByLabel("分区");
   await expect(categorySelect).not.toHaveValue("", { timeout: 20_000 });
   await categorySelect.selectOption({ index: 0 });
-  await page.locator('input[type="file"][accept^="video/"]').setInputFiles({
-    name: "e2e-minimal.mp4",
-    mimeType: "video/mp4",
-    buffer: MINIMAL_MP4
-  });
+  await page.locator('input[type="file"][accept^="video/"]').setInputFiles(FIXTURE_MP4);
   await page.getByRole("button", { name: "发布作品" }).click();
   await page.waitForURL(/\/video\/\d+$/, { timeout: 90_000 });
   const videoID = page.url().match(/\/video\/(\d+)$/)?.[1];

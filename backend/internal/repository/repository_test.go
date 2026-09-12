@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"gvideo/backend/internal/domain"
+	"gvideo/backend/internal/modules/comments"
 	"gvideo/backend/internal/platform"
 )
 
@@ -72,7 +73,7 @@ func TestVideoInteractions(t *testing.T) {
 	if err != nil || active {
 		t.Fatalf("toggle like off: active=%v err=%v", active, err)
 	}
-	comment, err := repo.CreateComment(ctx, user.ID, video.ID, "useful")
+	comment, err := comments.NewRepository(db).CreateComment(ctx, user.ID, video.ID, "useful")
 	if err != nil || comment.Content != "useful" {
 		t.Fatalf("create comment: %#v err=%v", comment, err)
 	}
@@ -134,53 +135,6 @@ func TestFavoriteVideosAreFilteredAndSortedByFavoriteTime(t *testing.T) {
 	count, err := repo.CountVideos(ctx, domain.VideoFilter{FavoriteUserID: user.ID})
 	if err != nil || count != 2 {
 		t.Fatalf("favorite count=%d err=%v", count, err)
-	}
-}
-
-func TestDeleteCommentAuthorization(t *testing.T) {
-	db, err := platform.OpenDatabase(filepath.Join(t.TempDir(), "comments.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	repo := New(db)
-	ctx := context.Background()
-	owner, err := repo.CreateUser(ctx, "comment_video_owner", "hash")
-	if err != nil {
-		t.Fatal(err)
-	}
-	author, err := repo.CreateUser(ctx, "comment_author", "hash")
-	if err != nil {
-		t.Fatal(err)
-	}
-	other, err := repo.CreateUser(ctx, "comment_other", "hash")
-	if err != nil {
-		t.Fatal(err)
-	}
-	video, err := repo.CreateVideo(ctx, domain.NewVideo{UserID: owner.ID, Title: "Comments", Category: "知识", VideoPath: "videos/comments.mp4", MimeType: "video/mp4", SizeBytes: 10})
-	if err != nil {
-		t.Fatal(err)
-	}
-	comment, err := repo.CreateComment(ctx, author.ID, video.ID, "remove me")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := repo.DeleteComment(ctx, other.ID, video.ID, comment.ID); !errors.Is(err, domain.ErrForbidden) {
-		t.Fatalf("other delete error = %v, want forbidden", err)
-	}
-	if err := repo.DeleteComment(ctx, owner.ID, video.ID, comment.ID); err != nil {
-		t.Fatalf("video owner delete: %v", err)
-	}
-	comments, err := repo.ListComments(ctx, video.ID)
-	if err != nil || len(comments) != 0 {
-		t.Fatalf("comments after delete = %#v err=%v", comments, err)
-	}
-	comment, err = repo.CreateComment(ctx, author.ID, video.ID, "author removes")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := repo.DeleteComment(ctx, author.ID, video.ID, comment.ID); err != nil {
-		t.Fatalf("comment author delete: %v", err)
 	}
 }
 
@@ -579,7 +533,7 @@ UPDATE videos SET views_count = CASE id WHEN ? THEN 10 WHEN ? THEN 20 ELSE 30 EN
 		if _, err := repo.ToggleFavorite(ctx, viewer.ID, videoID); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := repo.CreateComment(ctx, viewer.ID, videoID, "comment"); err != nil {
+		if _, err := comments.NewRepository(db).CreateComment(ctx, viewer.ID, videoID, "comment"); err != nil {
 			t.Fatal(err)
 		}
 	}
