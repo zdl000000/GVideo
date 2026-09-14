@@ -1,16 +1,16 @@
 # GVideo 开发交接
 
-> 更新日期：2026-09-12
+> 更新日期：2026-09-14
 > 当前分支：`codex/security-hardening`（自 `codex/architecture-hardening` 的 `84125fc` 切出）
 > 交接原则：实现、目标验证、只读复审、显式暂存、提交和推送必须串行；分支推送不代表生产发布获批。
 
 ## 1. 当前状态
 
-✅ **SEC-03c「CSP 收紧收尾 + nginx 头行为补充覆盖」已完成交付**——A2 迁移序列（4/4 模块 + 事件总线，批次 27）之后的本周期批次 28 已提交并推送至 `origin/codex/security-hardening`。
+✅ **批次 29「领域词表与架构决策记录回填」已完成交付**——纯文档批次：新增根 `CONTEXT.md`（12 个领域术语，与代码枚举逐项核对）与 `docs/adr/` 首批 5 篇 ADR（`0001` SQLite 单写、`0002` 模块化单体、`0003` 进程内事件总线、`0004` 安全头单值原则、`0005` 渐进式模块提取）；每篇含背景、决策、被拒替代方案与回退条件，均为既有事实回填，不引入新决策。
 
-本批修复代理路径上的重复安全头：此前前端源 nginx 的 server 级 `add_header ... always` 继承进 `/api/`、`/media/`、健康端点等代理 location，与后端中间件自产的安全头（含 deny-all CSP）叠加，实测每个响应头两份（两种不同 CSP 并存），且经 HTTPS 网关后 CSP 仍两份。修复后 SPA 安全头集仅由 `location /` 与 `location = /theme-init.js` 下发（`theme-init.js` 的 no-cache 语义保留），代理 location 纯透传后端单份头（deny-all CSP 保留）；网关链路实测全链路每头一份。新增 `frontend/e2e/security-headers.spec.ts` 钉住六类响应的头行为（SPA 文档/SPA 回退/theme-init/API/健康端点/媒体 404，断言单值与两侧 CSP 精确文本）；管理端点绑定警告用例补 PPROF_ADDR 端点命名断言。CSP 观察期确认闭环：e2e 全量 24 passed / 2 skipped，烟雾脚本 `issues=[]`、播放正常、收紧 CSP 在位。
+同时记录方向调整（2026-09-14 确认）：**主线转为打包发布（P1）、新方向立项（P2）与分布式演进（P3），停止功能与加固开发**；§5 队列已按此重排。个人技能库 `agent-skills`（`/grill`：方案拷问 + 决策落盘，改写自 mattpocock/skills）已独立建库并安装到 `~/.agents/skills/`，不属本仓库范围。
 
-交付程序：显式暂存本批路径并复核 staged diff 后提交 `fix(security): single-value security headers on proxied responses`，推送 `codex/security-hardening` 并核对本地/远端一致。不得使用 `git add .`，不得 amend、force push 或直接推送 main。
+交付程序：显式暂存本批路径并复核 staged diff 后提交 `docs: add domain glossary and architecture decision records`，推送 `codex/security-hardening` 并核对本地/远端一致。不得使用 `git add .`，不得 amend、force push 或直接推送 main。
 
 ## 2. 已完成的实现（批次 27 三工作流）
 
@@ -34,7 +34,13 @@
 
 ## 3. 验证证据边界
 
-2026-09-12 批次 28（SEC-03c 收尾）证据：
+2026-09-14 批次 29（文档回填）证据：
+
+- 事实核对：`CONTEXT.md` 术语与 ADR 中的表名/状态机/测试名逐项对照代码（`transcoding_jobs`、`processing_status` 四态、`video_reports` 四态、通知六类（四类社交 + 两类处理）、`TestModulesDoNotImportCoreLayers`、`security-headers.spec.ts`）。
+- 门禁：`scripts/check.ps1`、`git diff --check` 通过（纯文档批次，无代码改动）。
+- 复审：独立只读复审（事实一致性、文档互链、与既有 CHANGELOG/handoff 无矛盾）通过。
+
+批次 28（SEC-03c 收尾）证据（存档）：
 
 - 修复前实测：前端源 `:8088` 上 `/api/v1/videos`、`/healthz` 每个安全头两份（deny-all CSP + SPA CSP 并存）；网关 `:8443` 上 `/api/v1/videos` CSP 两份（四项非 CSP 头经网关 hide+re-add 已单份）。
 - 修复后实测：前端源 `/`、`/upload`（SPA 回退）、`/theme-init.js`（含 `Cache-Control: no-cache`）、`/api/v1/videos`（deny-all CSP）、`/healthz` 各头恰一份，`Server: nginx` 无版本号；网关 `/`、`/api/v1/videos` 各头恰一份，`/gateway-healthz` 保持网关自产四头。
@@ -67,26 +73,28 @@
 20. `A2-1`：notifications 纵向模块（读侧端点迁移、HTTPPort 模式、三层测试、守卫扩展）。
 21. `E2E-2`：评论旅程与跨用户通知旅程 spec（4 项，对运行栈实测）。
 22. `SEC-04b`：配额边界/删除释放强断言测试与升级指引。
-23. `A2-2`：comments 纵向模块（含通知镜像写、VideoAuthorID、三层测试）。本批。
-24. `SEC-03c`：CSP 收紧（去 `unsafe-inline`/`data:`）与管理端点警告边界用例。本批。
+23. `A2-2`：comments 纵向模块（含通知镜像写、VideoAuthorID、三层测试）。
+24. `SEC-03c`：CSP 收紧（去 `unsafe-inline`/`data:`）与管理端点警告边界用例。
 25. `FIX-01`：`/auth?next` 注册竞态修复（AuthRedirect）与真实 MP4 E2E 夹具治理。
-26. `A2-3`：interactions 纵向模块（Toggle 三方法迁移、通知镜像写、消费方查询、三层测试）。本批。
+26. `A2-3`：interactions 纵向模块（Toggle 三方法迁移、通知镜像写、消费方查询、三层测试）。
 27. `A2-4`：进程内事件总线（platform/bus 类型化同步分发、notifications 写所有者迁移、comments/interactions 改事件发布、三份镜像 INSERT 消除）。
-28. `SEC-03c`：CSP 收尾——前端源代理路径重复安全头修复（SPA 头集收敛到文档 location、代理纯透传后端单份头）、e2e 安全头 spec 六类断言、管理端点警告 PPROF 命名用例、CSP 观察期确认（e2e + 烟雾零违规）。本批。
+28. `SEC-03c`：CSP 收尾——前端源代理路径重复安全头修复（SPA 头集收敛到文档 location、代理纯透传后端单份头）、e2e 安全头 spec 六类断言、管理端点警告 PPROF 命名用例、CSP 观察期确认（e2e + 烟雾零违规）。
+29. `DOC-01`：领域词表与架构决策记录回填（`CONTEXT.md` 12 术语 + `docs/adr/` 首批 5 篇，含被拒替代方案与回退条件）。本批。
 
 ## 5. 当前任务与后续队列
 
-本周期交付后，后续队列（按优先级）：
+2026-09-14 方向调整（已确认）：**停止功能与加固开发**，主线转为打包发布与分布式演进：
 
-- `SEC-04b`（可选收尾）：配额可观测性（超配额计数指标/Runbook）、字幕字节计量、`processing` 卡死时的人工释放流程。
-- `SEC-05b`：frontend/nginx 容器降权（nginx-unprivileged，涉及端口映射变更与运行态演练）。
-- 环境治理：清理开发库中的历史 E2E 残留损坏视频（需停服 SQL 维护窗口或逐 owner API 删除）。
-- 既有独立队列：OpenAPI、依赖安全扫描；媒体管线独立（Storage 接口缝、worker 出进程、快慢队列）等待触发信号。
+- `P1` 打包发布：PR 合并 main（不得直接推送 main）、v1.0.0 tag 与 release notes、README 演示资产（视频/截图）、`docs/case-study.md`（引用 ADR 与证据）、roadmap 收敛（维护项标注为 planned maintenance）。
+- `P2` 新方向立项：用 `/grill` 技能做 greenfield 拷问，定域、技术栈与运行形态，产出首批 ADR 与项目骨架。
+- `P3` 分布式 Stage A/B/C：Redis 分布式限流与缓存、事件总线迁移 Outbox + 队列（ADR-0003 的回退路径）、转码 worker 出进程与 PostgreSQL、k8s 与跨队列 trace。
+
+维护队列（计划内、按需触发，不再作为主线）：`SEC-04b` 配额可观测性、`SEC-05b` nginx 容器降权、环境治理（历史损坏测试视频清理）、OpenAPI、依赖安全扫描。
 
 ## 6. 团队调度与验收
 
 - 总控执行写入、测试、容器重建和 Git 操作；架构评审、安全复审与前端工程 Agent 只读/受限并行（平台并发上限 2）。
-- 本周期两波并行：第一波 notifications 模块 + E2E 旅程（均已随 `2e01b27` 交付）；第二波 comments 模块 + CSP 收紧 + auth 竞态修复（本批）。复审按批分片，agent 启动失败时降级为总控复审并留痕。
+- 本周期两波并行：第一波 notifications 模块 + E2E 旅程（均已随 `2e01b27` 交付）；第二波 comments 模块 + CSP 收紧 + auth 竞态修复（批次 27）。复审按批分片，agent 启动失败时降级为总控复审并留痕。
 - 任一审查发现阻断，只修复有证据的最小范围并重新运行相关验证。
 - 目标测试、全仓静态门禁和代码只读联合审查均无阻断后，可以提交并推送开发分支。
 - 合并和实际生产部署仍遵循仓库审查与组织变更批准。
@@ -109,6 +117,16 @@
 - 复审：独立只读复审 A-F 六项全部通过，结论「可提交」；一条 P2 观察项留痕——代理 location 上 nginx 自产错误响应（>524m 的 413、后端不可达的 502/504）修复后不再携带安全头（修复前由 server 级 `add_header always` 覆盖），经网关时四项非 CSP 头由边缘补齐、仅 CSP 缺失，直连前端源仅限开发内网，属防御纵深轻微收窄，留待后续批次评估。
 - Git 交付顺序：显式暂存上述路径，复核 `git diff --cached --check` 与 staged diff，提交 `fix(security): single-value security headers on proxied responses`，推送当前开发分支并核对本地/远端一致。
 - 不创建自动守护任务；本批工作在当前会话内完成交付。
+
+## 6.3 2026-09-14 批次 29 交付点
+
+- 分支：`codex/security-hardening`（承接批次 28 的 `62bb88c`）。
+- 新增文件：`CONTEXT.md`、`docs/adr/0001-sqlite-single-writer.md` ～ `0005-incremental-module-extraction.md`；修改 `CHANGELOG.md`、本文件。
+- 术语与决策来源：与代码枚举逐项核对；决策为既有事实回填（含被拒替代方案与回退条件），不引入新决策。
+- 静态门禁：`scripts/check.ps1`、`git diff --check` 通过。
+- 复审：独立只读复审通过（事实一致性、文档互链、与既有文档无矛盾）。
+- Git 交付顺序：显式暂存上述路径，复核 `git diff --cached --check` 与 staged diff，提交 `docs: add domain glossary and architecture decision records`，推送当前开发分支并核对本地/远端一致。
+- 后续：P1 打包发布按 §5 执行；合并 main 走 PR，不直接推送。
 
 ## 7. 最终门禁与 Git
 
