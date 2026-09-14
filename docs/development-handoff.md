@@ -6,11 +6,11 @@
 
 ## 1. 当前状态
 
-✅ **批次 29「领域词表与架构决策记录回填」已完成交付**——纯文档批次：新增根 `CONTEXT.md`（12 个领域术语，与代码枚举逐项核对）与 `docs/adr/` 首批 5 篇 ADR（`0001` SQLite 单写、`0002` 模块化单体、`0003` 进程内事件总线、`0004` 安全头单值原则、`0005` 渐进式模块提取）；每篇含背景、决策、被拒替代方案与回退条件，均为既有事实回填，不引入新决策。
+✅ **批次 29/30 已完成交付**——批次 29 为领域文档回填：新增根 `CONTEXT.md`（12 个领域术语，与代码枚举逐项核对）与 `docs/adr/` 首批 5 篇 ADR（`0001` SQLite 单写、`0002` 模块化单体、`0003` 进程内事件总线、`0004` 安全头单值原则、`0005` 渐进式模块提取），每篇含背景、决策、被拒替代方案与回退条件，均为既有事实回填，不引入新决策。批次 30 为 P1 打包材料：`docs/case-study.md`（工程案例：架构、三个难题解法、工程方法、ADR 索引、演进路线）与 roadmap 收敛（维护队列 + 分布式演进方向）。
 
 同时记录方向调整（2026-09-14 确认）：**主线转为打包发布（P1）、新方向立项（P2）与分布式演进（P3），停止功能与加固开发**；§5 队列已按此重排。个人技能库 `agent-skills`（`/grill`：方案拷问 + 决策落盘，改写自 mattpocock/skills）已独立建库并安装到 `~/.agents/skills/`，不属本仓库范围。
 
-交付程序：显式暂存本批路径并复核 staged diff 后提交 `docs: add domain glossary and architecture decision records`，推送 `codex/security-hardening` 并核对本地/远端一致。不得使用 `git add .`，不得 amend、force push 或直接推送 main。
+交付程序：批次 29 已按同纪律完成（提交 `dcc26ce`，已推送）；批次 30 显式暂存本批路径并复核 staged diff 后提交 `docs: add engineering case study and converge roadmap`，推送 `codex/security-hardening` 并核对本地/远端一致。不得使用 `git add .`，不得 amend、force push 或直接推送 main。
 
 ## 2. 已完成的实现（批次 27 三工作流）
 
@@ -34,7 +34,11 @@
 
 ## 3. 验证证据边界
 
-2026-09-14 批次 29（文档回填）证据：
+2026-09-14 批次 30（P1 打包材料）证据：
+
+- 纯文档批次；`git diff --check` 通过；独立只读复审（数字与事实核对、ADR/handoff 互链、无夸大表述）通过。
+
+批次 29（领域文档回填）证据：
 
 - 事实核对：`CONTEXT.md` 术语与 ADR 中的表名/状态机/测试名逐项对照代码（`transcoding_jobs`、`processing_status` 四态、`video_reports` 四态、通知六类（四类社交 + 两类处理）、`TestModulesDoNotImportCoreLayers`、`security-headers.spec.ts`）。
 - 门禁：`scripts/check.ps1`、`git diff --check` 通过（纯文档批次，无代码改动）。
@@ -79,13 +83,14 @@
 26. `A2-3`：interactions 纵向模块（Toggle 三方法迁移、通知镜像写、消费方查询、三层测试）。
 27. `A2-4`：进程内事件总线（platform/bus 类型化同步分发、notifications 写所有者迁移、comments/interactions 改事件发布、三份镜像 INSERT 消除）。
 28. `SEC-03c`：CSP 收尾——前端源代理路径重复安全头修复（SPA 头集收敛到文档 location、代理纯透传后端单份头）、e2e 安全头 spec 六类断言、管理端点警告 PPROF 命名用例、CSP 观察期确认（e2e + 烟雾零违规）。
-29. `DOC-01`：领域词表与架构决策记录回填（`CONTEXT.md` 12 术语 + `docs/adr/` 首批 5 篇，含被拒替代方案与回退条件）。本批。
+29. `DOC-01`：领域词表与架构决策记录回填（`CONTEXT.md` 12 术语 + `docs/adr/` 首批 5 篇，含被拒替代方案与回退条件）。
+30. `DOC-02`：P1 打包材料——`docs/case-study.md`（工程案例：架构、三个难题解法、工程方法、ADR 索引、演进路线）与 `docs/roadmap.md` 收敛（v1.0.0 发布与维护 + 分布式演进）。本批。
 
 ## 5. 当前任务与后续队列
 
 2026-09-14 方向调整（已确认）：**停止功能与加固开发**，主线转为打包发布与分布式演进：
 
-- `P1` 打包发布：PR 合并 main（不得直接推送 main）、v1.0.0 tag 与 release notes、README 演示资产（视频/截图）、`docs/case-study.md`（引用 ADR 与证据）、roadmap 收敛（维护项标注为 planned maintenance）。
+- `P1` 打包发布：✅ `docs/case-study.md` 与 roadmap 收敛（批次 30）；待办：PR 合并 main（不得直接推送 main）、v1.0.0 tag 与 release notes、README 演示资产（视频/截图）。
 - `P2` 新方向立项：用 `/grill` 技能做 greenfield 拷问，定域、技术栈与运行形态，产出首批 ADR 与项目骨架。
 - `P3` 分布式 Stage A/B/C：Redis 分布式限流与缓存、事件总线迁移 Outbox + 队列（ADR-0003 的回退路径）、转码 worker 出进程与 PostgreSQL、k8s 与跨队列 trace。
 
@@ -127,6 +132,15 @@
 - 复审：独立只读复审通过（事实一致性、文档互链、与既有文档无矛盾）。
 - Git 交付顺序：显式暂存上述路径，复核 `git diff --cached --check` 与 staged diff，提交 `docs: add domain glossary and architecture decision records`，推送当前开发分支并核对本地/远端一致。
 - 后续：P1 打包发布按 §5 执行；合并 main 走 PR，不直接推送。
+
+## 6.4 2026-09-14 批次 30 交付点
+
+- 分支：`codex/security-hardening`（承接批次 29 的 `dcc26ce`）。
+- 新增/修改：`docs/case-study.md`（新增）、`docs/roadmap.md`（收敛）、`CHANGELOG.md`、本文件。
+- 内容边界：案例中的数字均取自仓库实测（代码行数、测试占比、e2e 通过数、批次数）；不含未验证的宣称。
+- 静态门禁：`git diff --check` 通过；复审：独立只读复审通过。
+- Git 交付顺序：显式暂存上述路径，复核 staged diff，提交 `docs: add engineering case study and converge roadmap`，推送当前开发分支并核对本地/远端一致。
+- 后续：P1 剩余项（PR 合并 main、v1.0.0 tag、README 演示资产）按 §5 执行。
 
 ## 7. 最终门禁与 Git
 
