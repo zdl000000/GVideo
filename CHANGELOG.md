@@ -4,7 +4,9 @@ GVideo 的重要变更记录在此。项目在首次正式发布后遵循语义�
 
 ## [未发布]
 
-（暂无）
+### 变更
+
+- 依赖维护批次：升级 `github.com/go-chi/chi/v5` 5.3.2、`golang.org/x/crypto` 0.56.0、`modernc.org/sqlite` 1.58.0、`lucide-react` 1.45.0、`vite` 8.3.0、`@types/react-dom` 19.2.5、`vitest` 5.0.0；全量门禁与 e2e 通过。`hls.js` 1.7.x 因超出 HLS bundle 预算（实测 raw 575.83 kB / gzip 177.04 kB，预算 550/170）暂缓升级，待专项评估（如 light 构建或预算复核）。
 
 ## [1.0.0] - 2026-09-15
 
