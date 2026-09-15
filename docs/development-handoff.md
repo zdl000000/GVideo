@@ -12,6 +12,8 @@
 
 **P1 已闭环（2026-09-15）**：PR #19 经 Backend / Backend Race / Frontend 三项 CI 通过后以 rebase 方式合并进 `main`（仓库禁用 merge commit），`v1.0.0` tag 与 GitHub Release 已发布（release notes 含升级注意）；main 与分支内容一致（rebase 后 SHA 不同）。
 
+**批次 33（2026-09-15，依赖维护）**：一次性应用待处理的 dependabot 升级并在本地完成全量验证——后端 `chi` 5.3.2 / `x/crypto` 0.56.0 / `sqlite` 1.58.0，前端 `lucide-react` 1.45.0 / `vite` 8.3.0 / `@types/react-dom` 19.2.5 / `vitest` 5.0.0；`hls.js` 1.7.x 因超出 HLS bundle 预算（raw 575.83 kB / gzip 177.04 kB vs 550/170）**暂缓**，对应 PR #15 保留待专项评估。**数字更正**：前端 vitest 全量基数为 **14 文件 / 52 例**；此前 PR/Release 文案中的「31 项」来自一次 VideoPlayer 测试文件 worker 启动超时的残缺运行（该 flake 表现为 13 文件/31 例 + 1 error、check.ps1 非零退出，重跑恢复），已在 GitHub 文案中更正并作为已知问题记录。
+
 交付程序：批次 29/30 已按同纪律完成（提交 `dcc26ce`、`03f74e6`，已推送）；批次 31 显式暂存 `README.md`、`docs/assets/`、`CHANGELOG.md`、本文件并复核 staged diff 后提交 `docs: add README demo gallery and screenshots`，推送 `codex/security-hardening` 并核对本地/远端一致。不得使用 `git add .`，不得 amend、force push 或直接推送 main。
 
 ## 2. 已完成的实现（批次 27 三工作流）
@@ -100,7 +102,8 @@
 29. `DOC-01`：领域词表与架构决策记录回填（`CONTEXT.md` 12 术语 + `docs/adr/` 首批 5 篇，含被拒替代方案与回退条件）。
 30. `DOC-02`：P1 打包材料——`docs/case-study.md`（工程案例：架构、三个难题解法、工程方法、ADR 索引、演进路线）与 `docs/roadmap.md` 收敛（v1.0.0 发布与维护 + 分布式演进）。
 31. `DOC-03`：README 演示资产——五张运行态实拍截图（首页/播放/工作台/通知中心/深色主题，JPEG 压缩总计 1.3MB，素材为 CC-BY 演示投稿）与文档导航入口。
-32. `DOC-04`：发布收尾——`CHANGELOG.md` 标记 `[1.0.0] - 2026-09-15`；handoff 记录 P1 闭环（PR #19 rebase 合并、`v1.0.0` tag、GitHub Release、技能库私有远端）。本批。
+32. `DOC-04`：发布收尾——`CHANGELOG.md` 标记 `[1.0.0] - 2026-09-15`；handoff 记录 P1 闭环（PR #19 rebase 合并、`v1.0.0` tag、GitHub Release、技能库私有远端）。
+33. `DEPS-01`：依赖维护——应用 7 项 dependabot 升级（后端 3、前端 4，含 vitest 5 大版本），本地全量门禁 + e2e 通过；hls.js 1.7.x 因 bundle 预算暂缓并留 PR #15；更正 vitest 全量基数并记录 VideoPlayer worker flake。本批。
 
 ## 5. 当前任务与后续队列
 
@@ -110,7 +113,7 @@
 - `P2` 新方向立项：用 `/grill` 技能做 greenfield 拷问，定域、技术栈与运行形态，产出首批 ADR 与项目骨架。
 - `P3` 分布式 Stage A/B/C：Redis 分布式限流与缓存、事件总线迁移 Outbox + 队列（ADR-0003 的回退路径）、转码 worker 出进程与 PostgreSQL、k8s 与跨队列 trace。
 
-维护队列（计划内、按需触发，不再作为主线）：`SEC-04b` 配额可观测性、`SEC-05b` nginx 容器降权、环境治理（历史损坏测试视频清理）、OpenAPI、依赖安全扫描。
+维护队列（计划内、按需触发，不再作为主线）：`SEC-04b` 配额可观测性、`SEC-05b` nginx 容器降权、环境治理（历史损坏测试视频清理）、OpenAPI、依赖安全扫描、`hls.js` 1.7.x 升级评估（bundle 预算）、前端 vitest worker 启动 flake（pool 策略评估）。
 
 ## 6. 团队调度与验收
 
@@ -175,6 +178,15 @@
 - 静态门禁：`git diff --check` 通过。
 - Git 交付顺序：显式暂存上述路径，复核 staged diff，提交 `docs: mark v1.0.0 release and close P1`，推送分支后创建 PR 并按仓库保护规则合并（rebase）。
 - 后续：`P2` 新方向立项（greenfield 拷问）与维护队列按 §5 执行。
+
+## 6.7 2026-09-15 批次 33 交付点（依赖维护）
+
+- 分支：`chore/deps-maintenance`（自 main `11c8f63` 切出）。
+- 修改：`backend/go.mod`、`backend/go.sum`、`frontend/package.json`、`frontend/package-lock.json`；`CHANGELOG.md`、本文件。
+- 版本：chi 5.3.2 / x/crypto 0.56.0 / sqlite 1.58.0 / lucide-react 1.45.0 / vite 8.3.0 / @types/react-dom 19.2.5 / vitest 5.0.0；hls.js 保持 ^1.6.17。
+- 验证：`scripts/check.ps1` 全绿（后端全包测试、vitest 5 全量 14 文件/52 例、tsc、构建与 HLS 预算 509.49 kB/155.52 kB）；重建镜像后 e2e 24 passed / 2 skipped。
+- 发现：hls.js 1.7.3 构建体积 raw 575.83 kB / gzip 177.04 kB，超预算（550/170）→ 暂缓，PR #15 保留并批注实测值。
+- 收尾：合并后关闭被取代的 dependabot PR（#10–#14、#17、#18）并注明取代关系；更正 GitHub Release 与 PR #19 文案中的 vitest 数字（31 → 52）；删除已合并的 `codex/security-hardening`、`codex/architecture-hardening` 分支（本地与远端，内容均在 main）。
 
 ## 7. 最终门禁与 Git
 
