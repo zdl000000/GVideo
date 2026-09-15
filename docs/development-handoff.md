@@ -1,16 +1,16 @@
 # GVideo 开发交接
 
-> 更新日期：2026-09-14
+> 更新日期：2026-09-15
 > 当前分支：`codex/security-hardening`（自 `codex/architecture-hardening` 的 `84125fc` 切出）
 > 交接原则：实现、目标验证、只读复审、显式暂存、提交和推送必须串行；分支推送不代表生产发布获批。
 
 ## 1. 当前状态
 
-✅ **批次 29/30 已完成交付**——批次 29 为领域文档回填：新增根 `CONTEXT.md`（12 个领域术语，与代码枚举逐项核对）与 `docs/adr/` 首批 5 篇 ADR（`0001` SQLite 单写、`0002` 模块化单体、`0003` 进程内事件总线、`0004` 安全头单值原则、`0005` 渐进式模块提取），每篇含背景、决策、被拒替代方案与回退条件，均为既有事实回填，不引入新决策。批次 30 为 P1 打包材料：`docs/case-study.md`（工程案例：架构、三个难题解法、工程方法、ADR 索引、演进路线）与 roadmap 收敛（维护队列 + 分布式演进方向）。
+✅ **批次 29/30/31 已完成交付**——批次 29 为领域文档回填：新增根 `CONTEXT.md`（12 个领域术语，与代码枚举逐项核对）与 `docs/adr/` 首批 5 篇 ADR（`0001` SQLite 单写、`0002` 模块化单体、`0003` 进程内事件总线、`0004` 安全头单值原则、`0005` 渐进式模块提取），每篇含背景、决策、被拒替代方案与回退条件，均为既有事实回填，不引入新决策。批次 30 为 P1 打包材料：`docs/case-study.md`（工程案例：架构、三个难题解法、工程方法、ADR 索引、演进路线）与 roadmap 收敛（维护队列 + 分布式演进方向）。批次 31 为 README 演示资产：五张运行态实拍截图（`docs/assets/*.jpg`，素材为 CC-BY 开放影片演示投稿）与文档导航入口（工程案例/ADR/领域词表）。
 
 同时记录方向调整（2026-09-14 确认）：**主线转为打包发布（P1）、新方向立项（P2）与分布式演进（P3），停止功能与加固开发**；§5 队列已按此重排。个人技能库 `agent-skills`（`/grill`：方案拷问 + 决策落盘，改写自 mattpocock/skills）已独立建库并安装到 `~/.agents/skills/`，不属本仓库范围。
 
-交付程序：批次 29 已按同纪律完成（提交 `dcc26ce`，已推送）；批次 30 显式暂存本批路径并复核 staged diff 后提交 `docs: add engineering case study and converge roadmap`，推送 `codex/security-hardening` 并核对本地/远端一致。不得使用 `git add .`，不得 amend、force push 或直接推送 main。
+交付程序：批次 29/30 已按同纪律完成（提交 `dcc26ce`、`03f74e6`，已推送）；批次 31 显式暂存 `README.md`、`docs/assets/`、`CHANGELOG.md`、本文件并复核 staged diff 后提交 `docs: add README demo gallery and screenshots`，推送 `codex/security-hardening` 并核对本地/远端一致。不得使用 `git add .`，不得 amend、force push 或直接推送 main。
 
 ## 2. 已完成的实现（批次 27 三工作流）
 
@@ -34,7 +34,14 @@
 
 ## 3. 验证证据边界
 
-2026-09-14 批次 30（P1 打包材料）证据：
+2026-09-15 批次 31（README 演示资产）证据：
+
+- 截图来自运行栈实拍（Playwright 脚本流程：注册/登录 → 上传 9 段真实素材 → 转码完成 → 评论 → 逐页截图），非合成图；演示素材为 Blender 开放影片（Big Buck Bunny / Sintel / Jellyfish，CC-BY），投稿简介中标注来源。
+- 资产：5 张 JPEG（1440/1600 宽，总计 1.3MB）；README 图片链接与文档导航逐条核对；`git diff --check` 通过。
+- 复审：复审 agent 启动失败（provider 服务端错误），按 §6 纪律降级为总控复审并留痕——README 标记与链接、图片内容抽查（5 张全部人工查阅）、文档一致性（批次号/日期/提交信息）、资产体积与 git 卫生逐项核对通过。
+- 附带数据操作：清理 9 条早期渐变演示投稿（经 UI 删除，属本批自建演示内容），开发库既有历史 E2E 残留未动（仍为独立维护项）。
+
+批次 30（P1 打包材料）证据：
 
 - 纯文档批次；`git diff --check` 通过；独立只读复审（数字与事实核对、ADR/handoff 互链、无夸大表述）通过。
 
@@ -84,13 +91,14 @@
 27. `A2-4`：进程内事件总线（platform/bus 类型化同步分发、notifications 写所有者迁移、comments/interactions 改事件发布、三份镜像 INSERT 消除）。
 28. `SEC-03c`：CSP 收尾——前端源代理路径重复安全头修复（SPA 头集收敛到文档 location、代理纯透传后端单份头）、e2e 安全头 spec 六类断言、管理端点警告 PPROF 命名用例、CSP 观察期确认（e2e + 烟雾零违规）。
 29. `DOC-01`：领域词表与架构决策记录回填（`CONTEXT.md` 12 术语 + `docs/adr/` 首批 5 篇，含被拒替代方案与回退条件）。
-30. `DOC-02`：P1 打包材料——`docs/case-study.md`（工程案例：架构、三个难题解法、工程方法、ADR 索引、演进路线）与 `docs/roadmap.md` 收敛（v1.0.0 发布与维护 + 分布式演进）。本批。
+30. `DOC-02`：P1 打包材料——`docs/case-study.md`（工程案例：架构、三个难题解法、工程方法、ADR 索引、演进路线）与 `docs/roadmap.md` 收敛（v1.0.0 发布与维护 + 分布式演进）。
+31. `DOC-03`：README 演示资产——五张运行态实拍截图（首页/播放/工作台/通知中心/深色主题，JPEG 压缩总计 1.3MB，素材为 CC-BY 演示投稿）与文档导航入口。本批。
 
 ## 5. 当前任务与后续队列
 
 2026-09-14 方向调整（已确认）：**停止功能与加固开发**，主线转为打包发布与分布式演进：
 
-- `P1` 打包发布：✅ `docs/case-study.md` 与 roadmap 收敛（批次 30）；待办：PR 合并 main（不得直接推送 main）、v1.0.0 tag 与 release notes、README 演示资产（视频/截图）。
+- `P1` 打包发布：✅ `docs/case-study.md` 与 roadmap 收敛（批次 30）；✅ README 演示资产与截图（批次 31）；待办：PR 合并 main（不得直接推送 main）、v1.0.0 tag 与 GitHub Release。
 - `P2` 新方向立项：用 `/grill` 技能做 greenfield 拷问，定域、技术栈与运行形态，产出首批 ADR 与项目骨架。
 - `P3` 分布式 Stage A/B/C：Redis 分布式限流与缓存、事件总线迁移 Outbox + 队列（ADR-0003 的回退路径）、转码 worker 出进程与 PostgreSQL、k8s 与跨队列 trace。
 
@@ -141,6 +149,15 @@
 - 静态门禁：`git diff --check` 通过；复审：独立只读复审通过。
 - Git 交付顺序：显式暂存上述路径，复核 staged diff，提交 `docs: add engineering case study and converge roadmap`，推送当前开发分支并核对本地/远端一致。
 - 后续：P1 剩余项（PR 合并 main、v1.0.0 tag、README 演示资产）按 §5 执行。
+
+## 6.5 2026-09-15 批次 31 交付点
+
+- 分支：`codex/security-hardening`（承接批次 30 的 `03f74e6`）。
+- 新增/修改：`README.md`（演示区 + 文档导航）、`docs/assets/`（5 张 JPEG 截图）、`CHANGELOG.md`、本文件。
+- 内容边界：截图全部来自运行栈实拍；演示投稿素材为 CC-BY 开放影片并在简介标注来源；不涉及产品代码改动。
+- 静态门禁：`git diff --check` 通过；复审：复审 agent 启动失败，降级为总控复审并留痕（见 §3）。
+- Git 交付顺序：显式暂存上述路径，复核 staged diff，提交 `docs: add README demo gallery and screenshots`，推送当前开发分支并核对本地/远端一致。
+- 后续：P1 剩余项（PR 合并 main、v1.0.0 tag 与 GitHub Release）按 §5 执行。
 
 ## 7. 最终门禁与 Git
 

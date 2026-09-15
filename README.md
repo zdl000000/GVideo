@@ -4,6 +4,20 @@ GVideo 是一个面向视频创作者与观众的社区型全栈项目。项目�
 
 当前版本已打通注册登录、视频投稿、媒体处理、发现与播放、作者空间、关注动态、点赞收藏、评论通知、举报审核、创作者工作台和字幕管理等主要流程。
 
+## 演示
+
+<p align="center"><img src="docs/assets/home.jpg" alt="GVideo 首页：最新发布与分区浏览" width="880" /></p>
+
+| 播放与评论 | 创作者工作台 |
+| --- | --- |
+| <img src="docs/assets/watch.jpg" alt="播放页：HLS 播放、清晰度选择与评论" width="430" /> | <img src="docs/assets/creator-dashboard.jpg" alt="创作者工作台：投稿管理与处理状态" width="430" /> |
+
+| 通知中心 | 深色主题 |
+| --- | --- |
+| <img src="docs/assets/notifications.jpg" alt="通知中心：互动与媒体处理通知" width="430" /> | <img src="docs/assets/home-dark.jpg" alt="深色主题首页" width="430" /> |
+
+截图中的演示投稿使用 Blender 开放影片（CC-BY）素材。工程叙事见 [工程案例](docs/case-study.md)，领域词汇见 [CONTEXT.md](CONTEXT.md)，关键取舍见 [架构决策记录](docs/adr/)。
+
 ## 核心能力
 
 - 服务端 Session、CSRF 防护、用户资料与头像管理
@@ -106,11 +120,14 @@ deploy/nginx/             HTTPS 网关配置
 scripts/                  开发、检查、验收、备份和恢复脚本
 ```
 
-项目正在渐进迁移到 Feature-first 结构。迁移期间保持 `app -> features -> shared` 的依赖方向，同时保留现有 API、数据库和部署兼容性，不进行高风险全仓重写。
+前端已按 Feature-first 组织（保持 `app -> features -> shared` 依赖方向），后端按纵向模块切分并保留现有 API、数据库和部署兼容性。
 
 ## 文档导航
 
+- [工程案例](docs/case-study.md)
 - [架构与 Feature-first 迁移](docs/architecture.md)
+- [架构决策记录](docs/adr/)
+- [领域词表](CONTEXT.md)
 - [开发交接与原子任务清单](docs/development-handoff.md)
 - [部署与配置](docs/deployment.md)
 - [运维、验收与备份恢复](docs/operations.md)
