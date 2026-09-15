@@ -124,19 +124,35 @@ scripts/                  开发、检查、验收、备份和恢复脚本
 
 ## 文档导航
 
+**工程与架构**
+
 - [工程案例](docs/case-study.md)
 - [架构与 Feature-first 迁移](docs/architecture.md)
 - [架构决策记录](docs/adr/)
 - [领域词表](CONTEXT.md)
-- [开发交接与原子任务清单](docs/development-handoff.md)
-- [部署与配置](docs/deployment.md)
-- [运维、验收与备份恢复](docs/operations.md)
-- [前端设计系统](docs/design-system.md)
-- [项目专项开发规范](docs/project-standards.md)
 - [公开开发路线](docs/roadmap.md)
+
+**契约与可观测性**
+
+- [API 错误契约](docs/api-error-contract.md)
+- [Auth API 契约](docs/auth-api-contract.md)
+- [可观测性契约](docs/observability.md)
+- [告警与 Runbook 规格](docs/observability-alerts.md)
+
+**流程与规范**
+
+- [开发交接与原子任务清单](docs/development-handoff.md)
+- [历史交付归档](docs/handoff-archive.md)
+- [项目专项开发规范](docs/project-standards.md)
+- [前端设计系统](docs/design-system.md)
 - [贡献指南](.github/CONTRIBUTING.md)
 - [安全策略](.github/SECURITY.md)
 - [变更记录](CHANGELOG.md)
+
+**部署与运维**
+
+- [部署与配置](docs/deployment.md)
+- [运维、验收与备份恢复](docs/operations.md)
 
 ## 安全提示
 

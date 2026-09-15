@@ -75,6 +75,14 @@ API 验收会删除本轮视频、字幕、评论和互动。由于当前没有�
 
 该命令用于确认 Docker 持久数据库中的主要记录数量，避免混淆本机调试库与 Docker 持久库。
 
+## 本地数据合并
+
+```powershell
+.\scripts\merge-local-data.ps1
+```
+
+把本机调试数据（`backend/data/gvideo.db` 与 `backend/media`）合并进 Docker 持久卷。脚本流程：先用 `gvideo data-backup` 为本机库生成一致快照（`backups/local-before-merge-<时间戳>.db`）；启动 Docker 后端并备份持久库（`backups/docker-before-merge-<时间戳>.db`）；把本机快照复制进容器后执行 `gvideo data-merge`（用户重名自动改名，会话与内容随迁）；最后把本机媒体目录复制进持久媒体卷并打印 `data-status`。两侧快照都会保留，合并结果异常时按「备份恢复演练」流程回滚，必要时用 `data-grant-admin` 恢复管理员标志。
+
 ## 管理员授予与恢复
 
 ```powershell
@@ -90,6 +98,7 @@ docker compose exec -T backend gvideo data-grant-admin <username>
 备份文件名包含目标版本、UTC 时间和随机后缀，例如 `gvideo-pre-migration-v2-20260910T004700.123456789Z-<suffix>.db`。Linux 上目录权限为 `0700`、文件权限为 `0600`。如果创建、验证、收紧权限或发布备份失败，应用会关闭数据库连接并停止启动，不执行迁移；如果迁移本身失败，已经发布的迁移前备份会保留用于恢复和诊断。
 
 系统不会自动清理 `.migration-backups/` 中的历史文件。值班人员应监控数据卷容量，在确认备份已归档且不再需要后按变更流程清理指定文件，不要删除整个目录。自动迁移前备份只覆盖 SQLite，不包含媒体卷；完整恢复点仍应使用下述数据库加媒体备份流程。
+
 ## 创建备份
 
 ```powershell
