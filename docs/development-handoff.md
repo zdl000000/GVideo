@@ -8,7 +8,9 @@
 
 ✅ **批次 29/30/31 已完成交付**——批次 29 为领域文档回填：新增根 `CONTEXT.md`（12 个领域术语，与代码枚举逐项核对）与 `docs/adr/` 首批 5 篇 ADR（`0001` SQLite 单写、`0002` 模块化单体、`0003` 进程内事件总线、`0004` 安全头单值原则、`0005` 渐进式模块提取），每篇含背景、决策、被拒替代方案与回退条件，均为既有事实回填，不引入新决策。批次 30 为 P1 打包材料：`docs/case-study.md`（工程案例：架构、三个难题解法、工程方法、ADR 索引、演进路线）与 roadmap 收敛（维护队列 + 分布式演进方向）。批次 31 为 README 演示资产：五张运行态实拍截图（`docs/assets/*.jpg`，素材为 CC-BY 开放影片演示投稿）与文档导航入口（工程案例/ADR/领域词表）。
 
-同时记录方向调整（2026-09-14 确认）：**主线转为打包发布（P1）、新方向立项（P2）与分布式演进（P3），停止功能与加固开发**；§5 队列已按此重排。个人技能库 `agent-skills`（`/grill`：方案拷问 + 决策落盘，改写自 mattpocock/skills）已独立建库并安装到 `~/.agents/skills/`，不属本仓库范围。
+同时记录方向调整（2026-09-14 确认）：**主线转为打包发布（P1）、新方向立项（P2）与分布式演进（P3），停止功能与加固开发**；§5 队列已按此重排。个人技能库 `agent-skills`（`/grill`：方案拷问 + 决策落盘，改写自 mattpocock/skills）已独立建库、安装到 `~/.agents/skills/` 并推送私有远端（`main` = `9c554e6`），不属本仓库范围。
+
+**P1 已闭环（2026-09-15）**：PR #19 经 Backend / Backend Race / Frontend 三项 CI 通过后以 rebase 方式合并进 `main`（仓库禁用 merge commit），`v1.0.0` tag 与 GitHub Release 已发布（release notes 含升级注意）；main 与分支内容一致（rebase 后 SHA 不同）。
 
 交付程序：批次 29/30 已按同纪律完成（提交 `dcc26ce`、`03f74e6`，已推送）；批次 31 显式暂存 `README.md`、`docs/assets/`、`CHANGELOG.md`、本文件并复核 staged diff 后提交 `docs: add README demo gallery and screenshots`，推送 `codex/security-hardening` 并核对本地/远端一致。不得使用 `git add .`，不得 amend、force push 或直接推送 main。
 
@@ -33,6 +35,11 @@
 - 烟雾脚本（tmp/shots/csp-smoke.mjs，不入库）：改从 API 挑选 `processing_status === 'ready'` 的视频。
 
 ## 3. 验证证据边界
+
+2026-09-15 批次 32（发布收尾）证据：
+
+- 纯文档批次；`git diff --check` 通过；发布事实以 GitHub API 响应与 `git ls-remote` 为准（PR #19 merged、tag `v1.0.0` → `daf94b6`、Release 已发布）。
+- 复审：状态收尾类改动，由总控逐项核对（CHANGELOG 链接、handoff 批次号/日期/链接、与远端一致）。
 
 2026-09-15 批次 31（README 演示资产）证据：
 
@@ -92,13 +99,14 @@
 28. `SEC-03c`：CSP 收尾——前端源代理路径重复安全头修复（SPA 头集收敛到文档 location、代理纯透传后端单份头）、e2e 安全头 spec 六类断言、管理端点警告 PPROF 命名用例、CSP 观察期确认（e2e + 烟雾零违规）。
 29. `DOC-01`：领域词表与架构决策记录回填（`CONTEXT.md` 12 术语 + `docs/adr/` 首批 5 篇，含被拒替代方案与回退条件）。
 30. `DOC-02`：P1 打包材料——`docs/case-study.md`（工程案例：架构、三个难题解法、工程方法、ADR 索引、演进路线）与 `docs/roadmap.md` 收敛（v1.0.0 发布与维护 + 分布式演进）。
-31. `DOC-03`：README 演示资产——五张运行态实拍截图（首页/播放/工作台/通知中心/深色主题，JPEG 压缩总计 1.3MB，素材为 CC-BY 演示投稿）与文档导航入口。本批。
+31. `DOC-03`：README 演示资产——五张运行态实拍截图（首页/播放/工作台/通知中心/深色主题，JPEG 压缩总计 1.3MB，素材为 CC-BY 演示投稿）与文档导航入口。
+32. `DOC-04`：发布收尾——`CHANGELOG.md` 标记 `[1.0.0] - 2026-09-15`；handoff 记录 P1 闭环（PR #19 rebase 合并、`v1.0.0` tag、GitHub Release、技能库私有远端）。本批。
 
 ## 5. 当前任务与后续队列
 
 2026-09-14 方向调整（已确认）：**停止功能与加固开发**，主线转为打包发布与分布式演进：
 
-- `P1` 打包发布：✅ `docs/case-study.md` 与 roadmap 收敛（批次 30）；✅ README 演示资产与截图（批次 31）；待办：PR 合并 main（不得直接推送 main）、v1.0.0 tag 与 GitHub Release。
+- `P1` 打包发布：✅ 全部完成——`docs/case-study.md` 与 roadmap 收敛（批次 30）、README 演示资产（批次 31）、PR #19 合并 main、`v1.0.0` tag 与 GitHub Release（批次 32 收录状态）。
 - `P2` 新方向立项：用 `/grill` 技能做 greenfield 拷问，定域、技术栈与运行形态，产出首批 ADR 与项目骨架。
 - `P3` 分布式 Stage A/B/C：Redis 分布式限流与缓存、事件总线迁移 Outbox + 队列（ADR-0003 的回退路径）、转码 worker 出进程与 PostgreSQL、k8s 与跨队列 trace。
 
@@ -158,6 +166,15 @@
 - 静态门禁：`git diff --check` 通过；复审：复审 agent 启动失败，降级为总控复审并留痕（见 §3）。
 - Git 交付顺序：显式暂存上述路径，复核 staged diff，提交 `docs: add README demo gallery and screenshots`，推送当前开发分支并核对本地/远端一致。
 - 后续：P1 剩余项（PR 合并 main、v1.0.0 tag 与 GitHub Release）按 §5 执行。
+
+## 6.6 2026-09-15 批次 32 交付点（发布收尾）
+
+- 分支：`codex/security-hardening`（承接批次 31 的 `81ceaa8`）。
+- 内容：`CHANGELOG.md` 标记 `[1.0.0] - 2026-09-15` 并新增空的「未发布」段与链接；本文件 §1/§3/§5 记录 P1 闭环（PR #19、tag、Release、技能库远端）。
+- 发布事实：PR #19（`md`：v1.0.0：安全加固、架构治理与工程文档）CI 三项通过后 rebase 合并；`v1.0.0` tag 指向 main `daf94b6`；GitHub Release `https://github.com/zdl000000/GVideo/releases/tag/v1.0.0`。
+- 静态门禁：`git diff --check` 通过。
+- Git 交付顺序：显式暂存上述路径，复核 staged diff，提交 `docs: mark v1.0.0 release and close P1`，推送分支后创建 PR 并按仓库保护规则合并（rebase）。
+- 后续：`P2` 新方向立项（greenfield 拷问）与维护队列按 §5 执行。
 
 ## 7. 最终门禁与 Git
 
