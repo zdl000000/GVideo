@@ -1,12 +1,12 @@
 # GVideo 开发交接
 
 > 更新日期：2026-09-15
-> 当前分支：`codex/security-hardening`（自 `codex/architecture-hardening` 的 `84125fc` 切出）
+> 当前状态：`main`（v1.0.0 已发布；发布后新增批次 33–35，最新 `37f1923`）
 > 交接原则：实现、目标验证、只读复审、显式暂存、提交和推送必须串行；分支推送不代表生产发布获批。
 
 ## 1. 当前状态
 
-✅ **批次 29/30/31 已完成交付**——批次 29 为领域文档回填：新增根 `CONTEXT.md`（12 个领域术语，与代码枚举逐项核对）与 `docs/adr/` 首批 5 篇 ADR（`0001` SQLite 单写、`0002` 模块化单体、`0003` 进程内事件总线、`0004` 安全头单值原则、`0005` 渐进式模块提取），每篇含背景、决策、被拒替代方案与回退条件，均为既有事实回填，不引入新决策。批次 30 为 P1 打包材料：`docs/case-study.md`（工程案例：架构、三个难题解法、工程方法、ADR 索引、演进路线）与 roadmap 收敛（维护队列 + 分布式演进方向）。批次 31 为 README 演示资产：五张运行态实拍截图（`docs/assets/*.jpg`，素材为 CC-BY 开放影片演示投稿）与文档导航入口（工程案例/ADR/领域词表）。
+✅ **v1.0.0 已发布；发布后完成批次 33–35**——批次 35 为仓库整理：README 文档导航补全（契约与可观测性四份文档）、`scripts/merge-local-data.ps1` 登记到 operations.md、历史交接记录归档到 [handoff-archive.md](./handoff-archive.md)（批次 27–31 的实现细节、证据与交付点），主文档回归当前状态与近期记录。批次 29–31 的领域词表、ADR、工程案例与演示截图已随 v1.0.0 进入仓库。
 
 **批次 34（2026-09-15，HLS light 构建 + 测试稳定性）**：`hls.js` 升到 1.7.3 并改用 `hls.js/light`（字幕走原生 TextTrack，未使用备用音轨/DRM/CMCD/变量替换），HLS chunk 从 509.49 kB 降到 **360.41 kB / gzip 113.16 kB**，解除 bundle 预算阻塞；`vitest.config.ts` 启用 `isolate: false` 复用单 worker（配套 `unstubGlobals: true`，并补齐三个测试文件的 `afterEach(cleanup)`），套件耗时从 20–140s 降到典型 **3.4–4.5s**（重负载下最长观察 32s），消除 worker 启动超时（vitest 硬编码 60s）的主要诱因；测试基线 **14 文件 / 52 例**。验证：`check.ps1` 全绿、e2e 24/2、播放烟雾 `playing + advanced + issues=[]`。
 
@@ -16,29 +16,15 @@
 
 **批次 33（2026-09-15，依赖维护）**：一次性应用待处理的 dependabot 升级并在本地完成全量验证——后端 `chi` 5.3.2 / `x/crypto` 0.56.0 / `sqlite` 1.58.0，前端 `lucide-react` 1.45.0 / `vite` 8.3.0 / `@types/react-dom` 19.2.5 / `vitest` 5.0.0；`hls.js` 1.7.x 因超出 HLS bundle 预算（raw 575.83 kB / gzip 177.04 kB vs 550/170）**暂缓**，对应 PR #15 保留待专项评估。**数字更正**：前端 vitest 全量基数为 **14 文件 / 52 例**；此前 PR/Release 文案中的「31 项」来自一次 VideoPlayer 测试文件 worker 启动超时的残缺运行（该 flake 表现为 13 文件/31 例 + 1 error、check.ps1 非零退出，重跑恢复），已在 GitHub 文案中更正并作为已知问题记录。
 
-交付程序：批次 29/30 已按同纪律完成（提交 `dcc26ce`、`03f74e6`，已推送）；批次 31 显式暂存 `README.md`、`docs/assets/`、`CHANGELOG.md`、本文件并复核 staged diff 后提交 `docs: add README demo gallery and screenshots`，推送 `codex/security-hardening` 并核对本地/远端一致。不得使用 `git add .`，不得 amend、force push 或直接推送 main。
-
-## 2. 已完成的实现（批次 27 三工作流）
-
-### 2.1 A2-2 comments 纵向模块
-
-- `modules/comments/`：repository（List/Create/Delete + VideoAuthorID + 镜像 createNotification）、service（1-500 字校验、可见性检查、通知写路径）、handler（HTTPPort：Principal/VideoID/CommentID/DecodeJSON/WriteJSON/WriteError）。
-- 接线：httpapi Handler 增 comments 字段、New 增参数、Routes 三端点改指模块、commentsHTTPPort 适配器（保留「无效的评论编号」400 文案）；main.go 装配。
-- 删除核心 `handlers_comments.go`/`service_comments.go`/`repository_comments.go`；`VideoByID` 的评论计数子查询与 `CreatorStats` 属核心职责未动（计数直接源自 comments 表，始终同步）。
-- 连带必改：notifications 模块测试的种子改用 comments 模块（恰好双向钉住镜像 INSERT 正确性）。
-
-### 2.2 SEC-03c CSP 收紧与警告用例
-
-- `frontend/nginx.conf`：`style-src 'self'`（去 `'unsafe-inline'`）、`img-src 'self' blob:`（去 `data:`）；`media-src/worker-src/child-src blob:` 保留。
-- `main_test.go`：警告分类补 4 个边界（主机名、缺端口、IPv4-mapped loopback、通配 IPv6）并断言警告文本包含端点名。
-
-### 2.3 产品修复与夹具治理
-
-- `AuthRedirect` 组件（features/auth）：已登录访问 /auth 按 next 回跳站内相对路径，拒绝 `//` 与绝对 URL；注册/登录成功跳转与该回跳一致，原竞态无害化。
-- `frontend/e2e/fixtures/sample.mp4`：后端容器内 ffmpeg 生成的真实 1 秒 MP4（16,969 字节，ffprobe 验证）；`notifications.spec.ts` 改用该夹具，上传可正常转码，不再产生 `processing_failed` 残留。
-- 烟雾脚本（tmp/shots/csp-smoke.mjs，不入库）：改从 API 挑选 `processing_status === 'ready'` 的视频。
+交付程序（现行）：改动走短生命周期分支 → PR → Backend / Backend Race / Frontend 三项 CI 通过后 rebase 合并 `main`；不得直接推送 main、不得 amend / force push、不得使用 `git add .`。批次 29–34 的提交流水见 §6.3–§6.8 与归档文件。
 
 ## 3. 验证证据边界
+
+2026-09-15 批次 35（仓库整理）证据：
+
+- 审计口径：`git ls-files` 215 个跟踪文件全量分类核对；忽略规则（`.gitignore`）覆盖日志/缓存/数据/密钥；无空目录、无跟踪残留、无幽灵文件；前端 33 个模块依赖图扫描零死代码（仅两个 `.d.ts` 环境声明无需被引用）；文档与脚本引用计数逐项核对（发现 4 份文档未进 README 导航、1 个脚本未登记）。
+- 归档拆分由脚本执行（`tmp/handoff-split.cjs`），核对：归档保留批次 27 实现细节与 27–31 证据、主文档保留批次 34/32 证据与 §6.6–6.8；主文档拆分后 138 行，本批补充（批次 35 证据、§4 第 35 项、§6.9）后交付为 152 行。
+- 门禁：`git diff --check` 通过（纯文档批次）。
 
 2026-09-15 批次 34（HLS light 构建 + 测试稳定性）证据：
 
@@ -52,31 +38,7 @@
 - 纯文档批次；`git diff --check` 通过；发布事实以 GitHub API 响应与 `git ls-remote` 为准（PR #19 merged、tag `v1.0.0` → `daf94b6`、Release 已发布）。
 - 复审：状态收尾类改动，由总控逐项核对（CHANGELOG 链接、handoff 批次号/日期/链接、与远端一致）。
 
-2026-09-15 批次 31（README 演示资产）证据：
-
-- 截图来自运行栈实拍（Playwright 脚本流程：注册/登录 → 上传 9 段真实素材 → 转码完成 → 评论 → 逐页截图），非合成图；演示素材为 Blender 开放影片（Big Buck Bunny / Sintel / Jellyfish，CC-BY），投稿简介中标注来源。
-- 资产：5 张 JPEG（1440/1600 宽，总计 1.3MB）；README 图片链接与文档导航逐条核对；`git diff --check` 通过。
-- 复审：复审 agent 启动失败（provider 服务端错误），按 §6 纪律降级为总控复审并留痕——README 标记与链接、图片内容抽查（5 张全部人工查阅）、文档一致性（批次号/日期/提交信息）、资产体积与 git 卫生逐项核对通过。
-- 附带数据操作：清理 9 条早期渐变演示投稿（经 UI 删除，属本批自建演示内容），开发库既有历史 E2E 残留未动（仍为独立维护项）。
-
-批次 30（P1 打包材料）证据：
-
-- 纯文档批次；`git diff --check` 通过；独立只读复审（数字与事实核对、ADR/handoff 互链、无夸大表述）通过。
-
-批次 29（领域文档回填）证据：
-
-- 事实核对：`CONTEXT.md` 术语与 ADR 中的表名/状态机/测试名逐项对照代码（`transcoding_jobs`、`processing_status` 四态、`video_reports` 四态、通知六类（四类社交 + 两类处理）、`TestModulesDoNotImportCoreLayers`、`security-headers.spec.ts`）。
-- 门禁：`scripts/check.ps1`、`git diff --check` 通过（纯文档批次，无代码改动）。
-- 复审：独立只读复审（事实一致性、文档互链、与既有 CHANGELOG/handoff 无矛盾）通过。
-
-批次 28（SEC-03c 收尾）证据（存档）：
-
-- 修复前实测：前端源 `:8088` 上 `/api/v1/videos`、`/healthz` 每个安全头两份（deny-all CSP + SPA CSP 并存）；网关 `:8443` 上 `/api/v1/videos` CSP 两份（四项非 CSP 头经网关 hide+re-add 已单份）。
-- 修复后实测：前端源 `/`、`/upload`（SPA 回退）、`/theme-init.js`（含 `Cache-Control: no-cache`）、`/api/v1/videos`（deny-all CSP）、`/healthz` 各头恰一份，`Server: nginx` 无版本号；网关 `/`、`/api/v1/videos` 各头恰一份，`/gateway-healthz` 保持网关自产四头。
-- 后端：`go test ./... -count=1` 全包通过（含 main_test 新增 PPROF_ADDR 命名断言）。
-- E2E 全量回归（重建后的 frontend 运行栈）：**24 passed / 2 skipped**——新增 `security-headers.spec.ts` 六类响应断言全过（2 项目 × 6）。
-- 烟雾：`issues=[]` 零违规、`cards=27`、有效视频播放正常、收紧 CSP 头在位——SEC-03c「CSP 观察期确认无回归」闭环。
-- 批次 27 证据（存档）：后端全包测试、`go vet`、`gofmt`、架构守卫通过；e2e 12 passed / 2 skipped；复审降级为总控逐行比对（agent 两次启动失败留痕）。
+更早批次（27–31）的实现细节与证据已归档到 [handoff-archive.md](./handoff-archive.md)。
 
 ## 4. 已完成队列
 
@@ -113,7 +75,8 @@
 31. `DOC-03`：README 演示资产——五张运行态实拍截图（首页/播放/工作台/通知中心/深色主题，JPEG 压缩总计 1.3MB，素材为 CC-BY 演示投稿）与文档导航入口。
 32. `DOC-04`：发布收尾——`CHANGELOG.md` 标记 `[1.0.0] - 2026-09-15`；handoff 记录 P1 闭环（PR #19 rebase 合并、`v1.0.0` tag、GitHub Release、技能库私有远端）。
 33. `DEPS-01`：依赖维护——应用 7 项 dependabot 升级（后端 3、前端 4，含 vitest 5 大版本），本地全量门禁 + e2e 通过；hls.js 1.7.x 因 bundle 预算暂缓并留 PR #15；更正 vitest 全量基数并记录 VideoPlayer worker flake。
-34. `PERF-02`：HLS light 构建——hls.js 1.7.3 + `hls.js/light`（字幕原生 TextTrack，未用被裁剪能力），chunk 509.49 → 360.41 kB；vitest `isolate: false` 使套件 22–140s → 3.5–16s 并消除启动超时诱因。本批。
+34. `PERF-02`：HLS light 构建——hls.js 1.7.3 + `hls.js/light`（字幕原生 TextTrack，未用被裁剪能力），chunk 509.49 → 360.41 kB；vitest `isolate: false` 使套件 20–140s → 典型 3.4–4.5s 并消除启动超时诱因。
+35. `DOC-05`：仓库整理——README 文档导航补齐契约/可观测性四份文档；`merge-local-data.ps1` 登记到 operations.md；`development-handoff.md` 拆分出 `docs/handoff-archive.md`（批次 27–31 实现细节/证据/交付点）并修正 §1 与交付程序；清理工作区残留日志。本批。
 
 ## 5. 当前任务与后续队列
 
@@ -133,52 +96,7 @@
 - 目标测试、全仓静态门禁和代码只读联合审查均无阻断后，可以提交并推送开发分支。
 - 合并和实际生产部署仍遵循仓库审查与组织变更批准。
 
-## 6.1 2026-09-12 A2-4 交付点
-
-- 分支：`codex/security-hardening`（承接 A2-3 的 `0ca849e`）。
-- 修改/新增文件：新增 `backend/internal/platform/bus/{bus.go,bus_test.go}`；新增 `backend/internal/modules/comments/`（事件发布改造 + 镜像删除）；修改 `backend/internal/modules/{comments,interactions,notifications}` 三模块、`backend/cmd/server/main.go`（总线装配 + 订阅）、删除 `backend/internal/repository/repository_notifications.go`（写路径迁入 notifications 模块）、相关测试迁移。
-- 静态门禁：`scripts/check.ps1`、`go test ./... -count=1`、`go vet`、`gofmt`、`git diff --check` 通过。
-- 行为保持：同步分发（订阅者在发布方 goroutine 内联）、自评抑制与空值防护随迁、通知失败仅告警不影响主流程。
-- Git 交付顺序：显式暂存上述路径，复核 `git diff --cached --check` 与 staged diff，提交 `feat: add in-process event bus for notifications`，推送当前开发分支并核对本地/远端一致。
-- 不创建自动守护任务；本批工作在当前会话内完成交付。
-
-## 6.2 2026-09-12 SEC-03c 收尾交付点
-
-- 分支：`codex/security-hardening`（承接 A2-4 后的 `5203374`）。
-- 修改/新增文件：`frontend/nginx.conf`（SPA 头集收敛到 `location /` 与 `location = /theme-init.js`，代理 location 纯透传）、`frontend/e2e/security-headers.spec.ts`（新增六类响应头断言）、`backend/cmd/server/main_test.go`（PPROF_ADDR 命名断言）、`CHANGELOG.md`、`docs/deployment.md`、本文件。
-- 行为保持：后端 deny-all CSP 继续随 API/媒体响应下发；`theme-init.js` 的 no-cache 重校验语义不变；网关模板未改动（其 hide+re-add 行为与本修复组合后全链路单值）。
-- 静态门禁：`scripts/check.ps1`、`git diff --check` 通过；运行态验证见 §3。
-- 复审：独立只读复审 A-F 六项全部通过，结论「可提交」；一条 P2 观察项留痕——代理 location 上 nginx 自产错误响应（>524m 的 413、后端不可达的 502/504）修复后不再携带安全头（修复前由 server 级 `add_header always` 覆盖），经网关时四项非 CSP 头由边缘补齐、仅 CSP 缺失，直连前端源仅限开发内网，属防御纵深轻微收窄，留待后续批次评估。
-- Git 交付顺序：显式暂存上述路径，复核 `git diff --cached --check` 与 staged diff，提交 `fix(security): single-value security headers on proxied responses`，推送当前开发分支并核对本地/远端一致。
-- 不创建自动守护任务；本批工作在当前会话内完成交付。
-
-## 6.3 2026-09-14 批次 29 交付点
-
-- 分支：`codex/security-hardening`（承接批次 28 的 `62bb88c`）。
-- 新增文件：`CONTEXT.md`、`docs/adr/0001-sqlite-single-writer.md` ～ `0005-incremental-module-extraction.md`；修改 `CHANGELOG.md`、本文件。
-- 术语与决策来源：与代码枚举逐项核对；决策为既有事实回填（含被拒替代方案与回退条件），不引入新决策。
-- 静态门禁：`scripts/check.ps1`、`git diff --check` 通过。
-- 复审：独立只读复审通过（事实一致性、文档互链、与既有文档无矛盾）。
-- Git 交付顺序：显式暂存上述路径，复核 `git diff --cached --check` 与 staged diff，提交 `docs: add domain glossary and architecture decision records`，推送当前开发分支并核对本地/远端一致。
-- 后续：P1 打包发布按 §5 执行；合并 main 走 PR，不直接推送。
-
-## 6.4 2026-09-14 批次 30 交付点
-
-- 分支：`codex/security-hardening`（承接批次 29 的 `dcc26ce`）。
-- 新增/修改：`docs/case-study.md`（新增）、`docs/roadmap.md`（收敛）、`CHANGELOG.md`、本文件。
-- 内容边界：案例中的数字均取自仓库实测（代码行数、测试占比、e2e 通过数、批次数）；不含未验证的宣称。
-- 静态门禁：`git diff --check` 通过；复审：独立只读复审通过。
-- Git 交付顺序：显式暂存上述路径，复核 staged diff，提交 `docs: add engineering case study and converge roadmap`，推送当前开发分支并核对本地/远端一致。
-- 后续：P1 剩余项（PR 合并 main、v1.0.0 tag、README 演示资产）按 §5 执行。
-
-## 6.5 2026-09-15 批次 31 交付点
-
-- 分支：`codex/security-hardening`（承接批次 30 的 `03f74e6`）。
-- 新增/修改：`README.md`（演示区 + 文档导航）、`docs/assets/`（5 张 JPEG 截图）、`CHANGELOG.md`、本文件。
-- 内容边界：截图全部来自运行栈实拍；演示投稿素材为 CC-BY 开放影片并在简介标注来源；不涉及产品代码改动。
-- 静态门禁：`git diff --check` 通过；复审：复审 agent 启动失败，降级为总控复审并留痕（见 §3）。
-- Git 交付顺序：显式暂存上述路径，复核 staged diff，提交 `docs: add README demo gallery and screenshots`，推送当前开发分支并核对本地/远端一致。
-- 后续：P1 剩余项（PR 合并 main、v1.0.0 tag 与 GitHub Release）按 §5 执行。
+历史交付点（批次 27–31，原 §6.1–§6.5）已归档到 [handoff-archive.md](./handoff-archive.md)；近期交付点见下。
 
 ## 6.6 2026-09-15 批次 32 交付点（发布收尾）
 
@@ -205,6 +123,14 @@
 - 行为边界：字幕仍由原生 TextTrack 渲染；light 构建裁剪的备用音轨 / DRM / CMCD / 变量替换在本项目未被使用（已逐项核验）。
 - 静态门禁与验证：`scripts/check.ps1`、e2e、播放烟雾见 §3。
 - Git 交付顺序：显式暂存上述路径，复核 staged diff，提交 `perf(player): ship hls.js light build and stabilize the test runner`，推送分支后创建 PR 并按保护规则合并（rebase）；合并后关闭 dependabot PR #15（注明经 light 构建落地）。
+
+## 6.9 2026-09-15 批次 35 交付点（仓库整理）
+
+- 分支：`chore/repo-tidy`（自 main `37f1923` 切出）。
+- 新增/修改：`docs/handoff-archive.md`（新增归档）、`docs/development-handoff.md`（拆分瘦身 + §1/交付程序修正 + §4 第 34 项耗时口径更正为「20–140s → 典型 3.4–4.5s」）、`README.md`（文档导航分组补齐）、`docs/operations.md`（登记 merge-local-data.ps1 + 标题空行修复）、`CHANGELOG.md`、本文件。
+- 删除/移动：无仓库文件删除；工作区残留日志（`frontend/tmp-vitest-*.log`）移入被忽略的 `tmp/vitest-runs/`。
+- 静态门禁：`git diff --check` 通过（纯文档批次）。
+- Git 交付顺序：显式暂存上述路径，复核 staged diff，提交 `docs: tidy repository layout and archive older handoff records`，推送分支后创建 PR 并按保护规则合并（rebase）。
 
 ## 7. 最终门禁与 Git
 
