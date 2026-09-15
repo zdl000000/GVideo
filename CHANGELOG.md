@@ -4,6 +4,10 @@ GVideo 的重要变更记录在此。项目在首次正式发布后遵循语义�
 
 ## [未发布]
 
+（暂无）
+
+## [1.0.0] - 2026-09-15
+
 ### 变更
 
 - 前端全量视觉重设计：玫瑰色品牌色体系、胶囊化频道导航与筛选控件、分层圆角与阴影令牌、玻璃质感播放器控件与 shimmer 骨架屏，浅色与深色主题同权重校准。
@@ -40,4 +44,5 @@ GVideo 的重要变更记录在此。项目在首次正式发布后遵循语义�
 - 新增每用户上传存储配额 `USER_STORAGE_QUOTA_BYTES`（Compose 默认 20 GiB，0 表示禁用）：按「源视频 + 封面 + HLS 转码实际产出」累计，超出后新上传返回 413 `storage_quota_exceeded`，防止循环上传耗尽磁盘；新增迁移 v3 记录封面与 HLS 字节，自动生成封面与换封面同步计量。
 - 低危加固：登录对不存在用户执行等效 bcrypt 比较以防时序枚举；CSRF 比较改为恒定时间；搜索关键词转义 LIKE 通配符（`%`、`_`、`\`）防止全表匹配扫描。
 
-[未发布]: https://github.com/zdl000000/GVideo/commits/main
+[未发布]: https://github.com/zdl000000/GVideo/compare/v1.0.0...main
+[1.0.0]: https://github.com/zdl000000/GVideo/releases/tag/v1.0.0
