@@ -6,7 +6,9 @@ GVideo 的重要变更记录在此。项目在首次正式发布后遵循语义�
 
 ### 变更
 
-- 依赖维护批次：升级 `github.com/go-chi/chi/v5` 5.3.2、`golang.org/x/crypto` 0.56.0、`modernc.org/sqlite` 1.58.0、`lucide-react` 1.45.0、`vite` 8.3.0、`@types/react-dom` 19.2.5、`vitest` 5.0.0；全量门禁与 e2e 通过。`hls.js` 1.7.x 因超出 HLS bundle 预算（实测 raw 575.83 kB / gzip 177.04 kB，预算 550/170）暂缓升级，待专项评估（如 light 构建或预算复核）。
+- HLS 播放切换到 hls.js light 构建并完成 1.7.3 升级：字幕走原生 TextTrack，未使用备用音轨 / DRM / CMCD / 变量替换，light 构建使 HLS chunk 从 509.49 kB 降到 360.41 kB（gzip 155.52 → 113.16 kB），升级不再受 FE-PERF-01 预算阻塞。
+- 前端测试启用 `isolate: false`（复用单个 worker）并配套 `unstubGlobals: true`：vitest 套件耗时从 20–140s 降到典型 3.4–4.5s（重负载下最长观察 32s），并消除 worker 启动超时（硬编码 60s 上限）的主要诱因；测试基线为 14 文件 / 52 例。
+- 依赖维护批次：升级 `github.com/go-chi/chi/v5` 5.3.2、`golang.org/x/crypto` 0.56.0、`modernc.org/sqlite` 1.58.0、`lucide-react` 1.45.0、`vite` 8.3.0、`@types/react-dom` 19.2.5、`vitest` 5.0.0；全量门禁与 e2e 通过。
 
 ## [1.0.0] - 2026-09-15
 
