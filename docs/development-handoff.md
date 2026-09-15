@@ -8,6 +8,8 @@
 
 ✅ **批次 29/30/31 已完成交付**——批次 29 为领域文档回填：新增根 `CONTEXT.md`（12 个领域术语，与代码枚举逐项核对）与 `docs/adr/` 首批 5 篇 ADR（`0001` SQLite 单写、`0002` 模块化单体、`0003` 进程内事件总线、`0004` 安全头单值原则、`0005` 渐进式模块提取），每篇含背景、决策、被拒替代方案与回退条件，均为既有事实回填，不引入新决策。批次 30 为 P1 打包材料：`docs/case-study.md`（工程案例：架构、三个难题解法、工程方法、ADR 索引、演进路线）与 roadmap 收敛（维护队列 + 分布式演进方向）。批次 31 为 README 演示资产：五张运行态实拍截图（`docs/assets/*.jpg`，素材为 CC-BY 开放影片演示投稿）与文档导航入口（工程案例/ADR/领域词表）。
 
+**批次 34（2026-09-15，HLS light 构建 + 测试稳定性）**：`hls.js` 升到 1.7.3 并改用 `hls.js/light`（字幕走原生 TextTrack，未使用备用音轨/DRM/CMCD/变量替换），HLS chunk 从 509.49 kB 降到 **360.41 kB / gzip 113.16 kB**，解除 bundle 预算阻塞；`vitest.config.ts` 启用 `isolate: false` 复用单 worker（配套 `unstubGlobals: true`，并补齐三个测试文件的 `afterEach(cleanup)`），套件耗时从 20–140s 降到典型 **3.4–4.5s**（重负载下最长观察 32s），消除 worker 启动超时（vitest 硬编码 60s）的主要诱因；测试基线 **14 文件 / 52 例**。验证：`check.ps1` 全绿、e2e 24/2、播放烟雾 `playing + advanced + issues=[]`。
+
 同时记录方向调整（2026-09-14 确认）：**主线转为打包发布（P1）、新方向立项（P2）与分布式演进（P3），停止功能与加固开发**；§5 队列已按此重排。个人技能库 `agent-skills`（`/grill`：方案拷问 + 决策落盘，改写自 mattpocock/skills）已独立建库、安装到 `~/.agents/skills/` 并推送私有远端（`main` = `9c554e6`），不属本仓库范围。
 
 **P1 已闭环（2026-09-15）**：PR #19 经 Backend / Backend Race / Frontend 三项 CI 通过后以 rebase 方式合并进 `main`（仓库禁用 merge commit），`v1.0.0` tag 与 GitHub Release 已发布（release notes 含升级注意）；main 与分支内容一致（rebase 后 SHA 不同）。
@@ -37,6 +39,13 @@
 - 烟雾脚本（tmp/shots/csp-smoke.mjs，不入库）：改从 API 挑选 `processing_status === 'ready'` 的视频。
 
 ## 3. 验证证据边界
+
+2026-09-15 批次 34（HLS light 构建 + 测试稳定性）证据：
+
+- 体积：`npm run build` 后 HLS chunk **360.41 kB / gzip 113.16 kB**（对照：全量 1.6.17 为 509.49/155.52，全量 1.7.3 为 575.83/177.04 超预算），`check-bundle-budget.mjs` 通过。
+- 功能：`tsc -b` 0 错误（新增 `src/types/hls-light.d.ts` 复用主包类型）；vitest 14 文件 / 52 例；重建 frontend 镜像后 e2e 24 passed / 2 skipped；播放烟雾（真实 HLS 播放）`playResult=playing`、`advanced=true`、`issues=[]`。
+- 稳定性：`isolate: false` 后连续 5 次全量运行全绿（3.43–4.49s；重负载下最长观察 31.99s），此前单 worker 每文件启动的高成本与 60s 硬编码启动超时不再构成主要诱因；复审建议的三项加固已落实（`unstubGlobals: true`、三个文件补 `afterEach(cleanup)`、类型声明注明 light 裁剪差异）。
+- 门禁：`scripts/check.ps1` 全绿。
 
 2026-09-15 批次 32（发布收尾）证据：
 
@@ -103,7 +112,8 @@
 30. `DOC-02`：P1 打包材料——`docs/case-study.md`（工程案例：架构、三个难题解法、工程方法、ADR 索引、演进路线）与 `docs/roadmap.md` 收敛（v1.0.0 发布与维护 + 分布式演进）。
 31. `DOC-03`：README 演示资产——五张运行态实拍截图（首页/播放/工作台/通知中心/深色主题，JPEG 压缩总计 1.3MB，素材为 CC-BY 演示投稿）与文档导航入口。
 32. `DOC-04`：发布收尾——`CHANGELOG.md` 标记 `[1.0.0] - 2026-09-15`；handoff 记录 P1 闭环（PR #19 rebase 合并、`v1.0.0` tag、GitHub Release、技能库私有远端）。
-33. `DEPS-01`：依赖维护——应用 7 项 dependabot 升级（后端 3、前端 4，含 vitest 5 大版本），本地全量门禁 + e2e 通过；hls.js 1.7.x 因 bundle 预算暂缓并留 PR #15；更正 vitest 全量基数并记录 VideoPlayer worker flake。本批。
+33. `DEPS-01`：依赖维护——应用 7 项 dependabot 升级（后端 3、前端 4，含 vitest 5 大版本），本地全量门禁 + e2e 通过；hls.js 1.7.x 因 bundle 预算暂缓并留 PR #15；更正 vitest 全量基数并记录 VideoPlayer worker flake。
+34. `PERF-02`：HLS light 构建——hls.js 1.7.3 + `hls.js/light`（字幕原生 TextTrack，未用被裁剪能力），chunk 509.49 → 360.41 kB；vitest `isolate: false` 使套件 22–140s → 3.5–16s 并消除启动超时诱因。本批。
 
 ## 5. 当前任务与后续队列
 
@@ -113,7 +123,7 @@
 - `P2` 新方向立项：用 `/grill` 技能做 greenfield 拷问，定域、技术栈与运行形态，产出首批 ADR 与项目骨架。
 - `P3` 分布式 Stage A/B/C：Redis 分布式限流与缓存、事件总线迁移 Outbox + 队列（ADR-0003 的回退路径）、转码 worker 出进程与 PostgreSQL、k8s 与跨队列 trace。
 
-维护队列（计划内、按需触发，不再作为主线）：`SEC-04b` 配额可观测性、`SEC-05b` nginx 容器降权、环境治理（历史损坏测试视频清理）、OpenAPI、依赖安全扫描、`hls.js` 1.7.x 升级评估（bundle 预算）、前端 vitest worker 启动 flake（pool 策略评估）。
+维护队列（计划内、按需触发，不再作为主线）：`SEC-04b` 配额可观测性、`SEC-05b` nginx 容器降权、环境治理（历史损坏测试视频清理）、OpenAPI、依赖安全扫描。
 
 ## 6. 团队调度与验收
 
@@ -187,6 +197,14 @@
 - 验证：`scripts/check.ps1` 全绿（后端全包测试、vitest 5 全量 14 文件/52 例、tsc、构建与 HLS 预算 509.49 kB/155.52 kB）；重建镜像后 e2e 24 passed / 2 skipped。
 - 发现：hls.js 1.7.3 构建体积 raw 575.83 kB / gzip 177.04 kB，超预算（550/170）→ 暂缓，PR #15 保留并批注实测值。
 - 收尾：合并后关闭被取代的 dependabot PR（#10–#14、#17、#18）并注明取代关系；更正 GitHub Release 与 PR #19 文案中的 vitest 数字（31 → 52）；删除已合并的 `codex/security-hardening`、`codex/architecture-hardening` 分支（本地与远端，内容均在 main）。
+
+## 6.8 2026-09-15 批次 34 交付点（HLS light 构建 + 测试稳定性）
+
+- 分支：`perf/hls-light-build`（自 main `1982247` 切出）。
+- 修改/新增：`frontend/src/features/watch/hlsLoader.ts`（改 `hls.js/light` + 说明注释）、`frontend/src/types/hls-light.d.ts`（新增类型声明）、`frontend/vitest.config.ts`（`isolate: false` + 注释）、`frontend/package.json` / `package-lock.json`（hls.js ^1.7.3）、`CHANGELOG.md`、本文件。
+- 行为边界：字幕仍由原生 TextTrack 渲染；light 构建裁剪的备用音轨 / DRM / CMCD / 变量替换在本项目未被使用（已逐项核验）。
+- 静态门禁与验证：`scripts/check.ps1`、e2e、播放烟雾见 §3。
+- Git 交付顺序：显式暂存上述路径，复核 staged diff，提交 `perf(player): ship hls.js light build and stabilize the test runner`，推送分支后创建 PR 并按保护规则合并（rebase）；合并后关闭 dependabot PR #15（注明经 light 构建落地）。
 
 ## 7. 最终门禁与 Git
 
