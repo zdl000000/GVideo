@@ -1,12 +1,14 @@
 # GVideo 开发交接
 
 > 更新日期：2026-09-15
-> 当前状态：`main`（v1.0.0 已发布；发布后完成批次 33–35，其中批次 35「仓库整理」随本文件所在提交交付）
+> 当前状态：`main`（v1.0.0 已发布；发布后完成批次 33–35 与 P2 立项，见 §1）
 > 交接原则：实现、目标验证、只读复审、显式暂存、提交和推送必须串行；分支推送不代表生产发布获批。
 
 ## 1. 当前状态
 
 ✅ **v1.0.0 已发布；发布后完成批次 33–35**——批次 35 为仓库整理：README 文档导航补全（契约与可观测性四份文档）、`scripts/merge-local-data.ps1` 登记到 operations.md、历史交接记录归档到 [handoff-archive.md](./handoff-archive.md)（批次 27–31 的实现细节、证据与交付点），主文档回归当前状态与近期记录。批次 29–31 的领域词表、ADR、工程案例与演示截图已随 v1.0.0 进入仓库。
+
+**批次 36（2026-09-15，P2 立项）**：新项目 **order-saga**（私有仓库 `zdl000000/order-saga`，main = `97087d9`）完成立项与骨架——经两轮 /grill 拷问定形：订单/库存/支付 Saga 域；Go + PostgreSQL + Redis + Kafka（franz-go）+ 对外 chi REST / 内部 gRPC；四服务拓扑（gateway / order / inventory / payment）；手写一致性五件套（Outbox、编排式 Saga、幂等消费、Redis 锁与 Lua 限流、防超卖双实现）。首批 ADR-0001~0005、领域词表 CONTEXT.md、四服务可编译骨架与已验证的 compose 基础设施（PG/Redis/Kafka 健康、每服务独立 database）全部入库。GVideo 保持冻结维护；P3（本仓库分布式演进）顺延，其 ADR-0003 回退路径可由 order-saga 实践反向印证。
 
 **批次 34（2026-09-15，HLS light 构建 + 测试稳定性）**：`hls.js` 升到 1.7.3 并改用 `hls.js/light`（字幕走原生 TextTrack，未使用备用音轨/DRM/CMCD/变量替换），HLS chunk 从 509.49 kB 降到 **360.41 kB / gzip 113.16 kB**，解除 bundle 预算阻塞；`vitest.config.ts` 启用 `isolate: false` 复用单 worker（配套 `unstubGlobals: true`，并补齐三个测试文件的 `afterEach(cleanup)`），套件耗时从 20–140s 降到典型 **3.4–4.5s**（重负载下最长观察 32s），消除 worker 启动超时（vitest 硬编码 60s）的主要诱因；测试基线 **14 文件 / 52 例**。验证：`check.ps1` 全绿、e2e 24/2、播放烟雾 `playing + advanced + issues=[]`。
 
@@ -19,6 +21,12 @@
 交付程序（现行）：改动走短生命周期分支 → PR → Backend / Backend Race / Frontend 三项 CI 通过后 rebase 合并 `main`；不得直接推送 main、不得 amend / force push、不得使用 `git add .`。批次 29–34 的提交流水见 §6.3–§6.8 与归档文件。
 
 ## 3. 验证证据边界
+
+2026-09-15 批次 36（P2 立项）证据：
+
+- 新仓库本地验证：`go build ./... && go vet ./...` 与 gofmt 干净（零依赖骨架）；`docker compose config` 合法；PG / Redis / Kafka 三容器 healthy，`order_db` / `inventory_db` / `payment_db` 由 init 脚本创建并逐个核对。
+- 决策记录：两轮 /grill 拷问（十问）全部落 ADR-0001~0005，无超范围承诺。
+- 复审：立项批次由总控复核（ADR 与拷问轮次一致、文档与骨架一致）；远端推送与仓库状态以 `git ls-remote` / GitHub API 为准。
 
 2026-09-15 批次 35（仓库整理）证据：
 
@@ -76,14 +84,15 @@
 32. `DOC-04`：发布收尾——`CHANGELOG.md` 标记 `[1.0.0] - 2026-09-15`；handoff 记录 P1 闭环（PR #19 rebase 合并、`v1.0.0` tag、GitHub Release、技能库私有远端）。
 33. `DEPS-01`：依赖维护——应用 7 项 dependabot 升级（后端 3、前端 4，含 vitest 5 大版本），本地全量门禁 + e2e 通过；hls.js 1.7.x 因 bundle 预算暂缓并留 PR #15；更正 vitest 全量基数并记录 VideoPlayer worker flake。
 34. `PERF-02`：HLS light 构建——hls.js 1.7.3 + `hls.js/light`（字幕原生 TextTrack，未用被裁剪能力），chunk 509.49 → 360.41 kB；vitest `isolate: false` 使套件 20–140s → 典型 3.4–4.5s 并消除启动超时诱因。
-35. `DOC-05`：仓库整理——README 文档导航补齐契约/可观测性四份文档；`merge-local-data.ps1` 登记到 operations.md；`development-handoff.md` 拆分出 `docs/handoff-archive.md`（批次 27–31 实现细节/证据/交付点）并修正 §1 与交付程序；清理工作区残留日志。本批。
+35. `DOC-05`：仓库整理——README 文档导航补齐契约/可观测性四份文档；`merge-local-data.ps1` 登记到 operations.md；`development-handoff.md` 拆分出 `docs/handoff-archive.md`（批次 27–31 实现细节/证据/交付点）并修正 §1 与交付程序；清理工作区残留日志。
+36. `P2-01`：新项目立项——**order-saga**（订单/库存/支付 Saga，Go + PostgreSQL + Redis + Kafka，四服务），ADR-0001~0005 + CONTEXT.md + 四服务骨架 + 已验证 compose 入库（私有仓库 `zdl000000/order-saga`）。本批。
 
 ## 5. 当前任务与后续队列
 
 2026-09-14 方向调整（已确认）：**停止功能与加固开发**，主线转为打包发布与分布式演进：
 
 - `P1` 打包发布：✅ 全部完成——`docs/case-study.md` 与 roadmap 收敛（批次 30）、README 演示资产（批次 31）、PR #19 合并 main、`v1.0.0` tag 与 GitHub Release（批次 32 收录状态）。
-- `P2` 新方向立项：用 `/grill` 技能做 greenfield 拷问，定域、技术栈与运行形态，产出首批 ADR 与项目骨架。
+- `P2` 新方向立项：✅ 立项完成（批次 36）——新仓库 `order-saga`（私有，main = `97087d9`），订单/库存/支付 Saga 域，ADR-0001~0005、领域词表、四服务骨架与 compose 基础设施入库；里程碑 M1–M5 见其 README。
 - `P3` 分布式 Stage A/B/C：Redis 分布式限流与缓存、事件总线迁移 Outbox + 队列（ADR-0003 的回退路径）、转码 worker 出进程与 PostgreSQL、k8s 与跨队列 trace。
 
 维护队列（计划内、按需触发，不再作为主线）：`SEC-04b` 配额可观测性、`SEC-05b` nginx 容器降权、环境治理（历史损坏测试视频清理）、OpenAPI、依赖安全扫描。
@@ -131,6 +140,13 @@
 - 删除/移动：无仓库文件删除；工作区残留日志（`frontend/tmp-vitest-*.log`）移入被忽略的 `tmp/vitest-runs/`。
 - 静态门禁：`git diff --check` 通过（纯文档批次）。
 - Git 交付顺序：显式暂存上述路径，复核 staged diff，提交 `docs: tidy repository layout and archive older handoff records`，推送分支后创建 PR 并按保护规则合并（rebase）。
+
+## 6.10 2026-09-15 批次 36 交付点（P2 立项）
+
+- 新仓库：`zdl000000/order-saga`（私有，main = `97087d9`）；本仓库仅更新本文件记录状态。
+- 立项方式：两轮 /grill 拷问（第一轮定位/岗位/周期/边界/GVideo 处置，第二轮域/存储/MQ/拓扑/一致性/验收），十问全部落入 ADR-0001~0005。
+- 骨架内容：四服务健康检查（零依赖可编译）、`deploy/docker-compose.yaml`（PG 17 / Redis 7 / Kafka KRaft 健康检查 + 每服务独立 database init）、CONTEXT.md 领域词表、README（范围/架构/路线 M1–M5）。
+- 后续：order-saga 按 M1–M5 推进（proto 契约 → 主链路 → 支付与超时 → 治理 → 交付）；GVideo 维护队列按需触发。
 
 ## 7. 最终门禁与 Git
 
