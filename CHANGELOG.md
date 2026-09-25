@@ -6,6 +6,9 @@ GVideo 的重要变更记录在此。项目在首次正式发布后遵循语义�
 
 ### 变更
 
+- 依赖维护批次：升级 `react` / `react-dom` 19.3.0、`@types/react` / `@types/react-dom` 19.3.0、`react-router-dom` 7.18.4、`@vitejs/plugin-react` 6.1.1、`@playwright/test` 1.63.0；全量门禁通过。
+- `scripts/check.ps1` 在未显式设置 `GOPROXY` 时默认走 `goproxy.cn`（与 backend/Dockerfile 一致），修复受限网络下 Go 测试无法拉取依赖导致的门禁失败。
+
 - 仓库整理：README 文档导航补齐 API 契约与可观测性四份文档；`scripts/merge-local-data.ps1` 在运维文档登记；开发交接文档拆分出 `docs/handoff-archive.md`（批次 27–31 的实现细节、证据与交付点）并将主文档收敛为当前状态与近期记录。
 - HLS 播放切换到 hls.js light 构建并完成 1.7.3 升级：字幕走原生 TextTrack，未使用备用音轨 / DRM / CMCD / 变量替换，light 构建使 HLS chunk 从 509.49 kB 降到 360.41 kB（gzip 155.52 → 113.16 kB），升级不再受 FE-PERF-01 预算阻塞。
 - 前端测试启用 `isolate: false`（复用单个 worker）并配套 `unstubGlobals: true`：vitest 套件耗时从 20–140s 降到典型 3.4–4.5s（重负载下最长观察 32s），并消除 worker 启动超时（硬编码 60s 上限）的主要诱因；测试基线为 14 文件 / 52 例。

@@ -3,6 +3,8 @@ $root = Split-Path -Parent $PSScriptRoot
 $go = (Get-Command go -ErrorAction SilentlyContinue).Source
 if (-not $go) { $go = "C:\Program Files\Go\bin\go.exe" }
 $env:GOCACHE = Join-Path $root "tmp\go-build"
+# 与 backend/Dockerfile 保持一致：受限网络下走可用的 Go 模块代理。
+if (-not $env:GOPROXY) { $env:GOPROXY = "https://goproxy.cn,direct" }
 
 function Assert-LastExitCode([string]$Message) {
     if ($LASTEXITCODE -ne 0) {
