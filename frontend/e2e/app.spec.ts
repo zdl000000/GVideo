@@ -41,19 +41,33 @@ test("theme selection persists after navigation and reload", async ({ page, isMo
   await page.evaluate(() => localStorage.removeItem("gvideo-theme"));
   await page.reload();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute("content", "#f7f8fa");
 
-  if (isMobile) {
-    await page.locator(".mobile-menu-button").click();
-    await expect(page.locator(".sidebar.open")).toBeVisible();
-  }
-  const themeButton = isMobile
-    ? page.locator(".mobile-account .theme-row")
-    : page.locator(".desktop-actions .theme-button");
-  await themeButton.click();
+  await page.evaluate(() => localStorage.setItem("gvideo-theme", "invalid"));
+  await page.reload();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+
+  const toggleTheme = async () => {
+    if (isMobile) {
+      await page.locator(".mobile-menu-button").click();
+      await expect(page.locator(".sidebar.open")).toBeVisible();
+    }
+    await (isMobile
+      ? page.locator(".mobile-account .theme-row")
+      : page.locator(".desktop-actions .theme-button")).click();
+  };
+  await toggleTheme();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
-
+  await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute("content", "#080a0d");
+  await page.goto("/latest");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   await page.reload();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+
+  await toggleTheme();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  await page.reload();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
   await expectNoHorizontalOverflow(page);
 });
 

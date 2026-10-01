@@ -1,0 +1,29 @@
+{
+  "version": "GVideo 3.0",
+  "direction": {
+    "watch": [
+      "Kinetic Editorial",
+      "Spatial Cinema"
+    ],
+    "studio": [
+      "Radical Creator OS"
+    ]
+  },
+  "reference_images": {
+    "direction": "00_direction/GVideo3_direction_board.png",
+    "design_system": "01_design_system/design_system_board.png",
+    "watch_home": "02_watch/watch_home.png",
+    "watch_discover": "02_watch/watch_discover.png",
+    "watch_video": "02_watch/watch_video.png",
+    "creator_channel": "02_watch/creator_channel.png",
+    "studio_dashboard": "03_studio/studio_dashboard.png",
+    "studio_content": "03_studio/studio_content.png",
+    "studio_publish": "03_studio/studio_publish.png",
+    "mobile": "04_mobile/mobile_watch_video_studio.png"
+  },
+  "assets": {
+    "brand_mark": "05_assets/gvideo-mark.svg",
+    "grain": "05_assets/grain-tile.svg",
+    "tokens": "05_assets/tokens.css"
+  }
+}
