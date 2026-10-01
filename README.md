@@ -30,7 +30,7 @@ GVideo 是一个面向视频创作者与观众的社区型全栈项目。项目�
 - `public`、`unlisted`、`private` 投稿可见性及媒体鉴权
 - VTT/SRT 字幕上传、默认轨道切换和删除
 - 用户举报与管理员审核
-- 浅色默认主题和可选深色主题
+- 浅色默认主题和可选深色主题，保留已保存的主题偏好
 - Docker Compose、HTTPS 网关、备份恢复和自动化验收脚本
 
 字幕创作与管理仅位于 `/me/videos` 投稿管理流程，播放页只负责选择已有字幕轨道。
@@ -145,6 +145,7 @@ scripts/                  开发、检查、验收、备份和恢复脚本
 - [历史交付归档](docs/handoff-archive.md)
 - [项目专项开发规范](docs/project-standards.md)
 - [前端设计系统](docs/design-system.md)
+- [GVideo 3.0 重构进度](docs/gvideo3-progress.md)
 - [贡献指南](.github/CONTRIBUTING.md)
 - [安全策略](.github/SECURITY.md)
 - [变更记录](CHANGELOG.md)

@@ -1,0 +1,45 @@
+/* ---------------- motion ---------------- */
+
+@media (hover: hover) and (pointer: fine) {
+  .gv-button--primary:hover:not(:disabled) { background: var(--gv-brand-hover); }
+  .gv-button--secondary:hover:not(:disabled), .gv-button--ghost:hover:not(:disabled), .gv-icon-button:hover:not(:disabled) { background: var(--gv-surface-2); color: var(--gv-text); }
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+@media (hover: hover) and (pointer: fine) {
+  .icon-button:hover { background: var(--soft); }
+  .user-chip:hover { background: var(--soft); }
+  .channel-bar a:hover:not(.active), .nav-item:hover { background: var(--soft); color: var(--ink); }
+  .featured-lead:hover > img, .featured-mini-cover:hover > img, .cover-link:hover img, .related-cover:hover img, .management-cover:hover img { transform: scale(1.025); }
+  .cover-link:hover { box-shadow: var(--shadow-md); }
+  .featured-author-link:hover, .featured-lead-title:hover { color: #ffdfe3; }
+  .featured-mini-title:hover, .featured-mini-author a:hover, .video-title:hover, .video-author-link:hover,
+  .creator-name-link:hover, .comment-author-link:hover, .related-author:hover, .related-heading > a:hover,
+  .related-title:hover, .dashboard-video-copy > a:hover, .notification-copy > a:hover,
+  .admin-report-title a:hover, .admin-report-meta a:hover, .management-title-line > a:hover { color: var(--coral-dark); }
+  .category-scroller button:hover:not(.active) { background: var(--soft); }
+  .cover-link:hover .play-overlay { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  .pagination button:hover:not(:disabled):not(.active) { border-color: var(--muted); color: var(--ink); }
+  .primary-button:hover:not(:disabled), .danger-button:hover:not(:disabled) { background: var(--gv-brand-hover); }
+  .primary-button:active:not(:disabled), .danger-button:active:not(:disabled) { box-shadow: inset 0 1px 0 rgba(255, 255, 255, .18), 0 1px 4px rgba(225, 29, 72, .3); }
+  .secondary-button:hover:not(:disabled) { border-color: var(--muted); background: var(--soft); }
+  .player-icon-button:hover, .player-text-button:hover, .quality-trigger:hover { color: #fff; background: rgba(255, 255, 255, .14); }
+  .quality-menu button:hover, .speed-menu button:hover, .settings-menu button:hover, .subtitle-menu button:hover { color: #fff; background: rgba(255, 255, 255, .1); }
+  .volume-control:hover input { opacity: 1; pointer-events: auto; }
+  .watch-actions button:hover:not(.active) { color: var(--ink); background: var(--soft); }
+  .resume-notice button:hover { color: #fff; }
+  .comment-delete-button:hover:not(:disabled) { background: var(--active-soft); color: var(--coral-dark); }
+  .file-drop:hover { border-color: var(--teal); background: var(--teal-soft); color: var(--teal); }
+  .subtitle-picker:hover, .subtitle-track-actions button:hover:not(:disabled), .management-actions button:hover:not(:disabled) { border-color: var(--muted); color: var(--ink); }
+  .subtitle-track-actions button.danger:hover:not(:disabled), .favorite-remove-button:hover,
+  .management-actions button.danger:hover:not(:disabled) { border-color: var(--coral); background: var(--active-soft); color: var(--coral-dark); }
+  .admin-report-actions button:hover:not(:disabled) { border-color: var(--teal); background: var(--teal-soft); color: var(--teal); }
+  .admin-report-actions button.dismiss:hover:not(:disabled) { border-color: var(--coral); background: var(--active-soft); color: var(--coral-dark); }
+}
+
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}
