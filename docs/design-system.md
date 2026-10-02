@@ -40,7 +40,7 @@ Auth 外壳独立，保留 `/auth`、登录注册与 next 回跳。三种外壳�
 
 ## CSS 与组件边界
 
-`src/styles.css` 仅导入八个文件：
+`src/styles.css` 保持样式入口，Phase 1 的八个文件为：
 
 - `tokens.css`：主题、排版、间距、圆角、动效令牌和过渡别名。
 - `base.css`：基础元素、共享 primitives、反馈、分页、处理状态和弹窗公共样式。
@@ -50,6 +50,8 @@ Auth 外壳独立，保留 `/auth`、登录注册与 next 回跳。三种外壳�
 - `auth.css`：登录注册内容布局。
 - `responsive.css`：页面响应式规则；Shell 自身断点位于 shells。
 - `motion.css`：交互动效、hover 与 reduced-motion。
+
+Phase 3 增加 `watch-playback.css`，在 responsive 之后、motion 之前导入。规则只作用于 `.gv-watch-page`、`.gv-channel-page` 和包含这两个页面的 WATCH 浅色外壳，保留已封版的发现页和 Studio 视觉。
 
 依赖保持 `app -> features -> shared`。Shell 只组织导航和 Outlet；Auth 状态、用户/管理员守卫留在 App。请求和业务操作保留在现有 feature。共享 UI 不反向导入 app/features。
 
@@ -92,12 +94,24 @@ Phase 2.1：回退统一为抽象 media placeholder，使用既有 mark、极轻
 
 ## 后续页面约束
 
+Phase 3 播放页采用 player-first 顺序：播放器、非 ready 的轻量处理状态、标题、元信息与操作、作者身份、简介、评论。>=1180px 为主列与 300px Related rail，较窄桌面/平板相关内容两列，<=700px 为单列。标题最多三行并允许连续 ASCII 换行；简介和评论保留文本换行，不引入 Markdown 或自动链接。
+
+Theater 只切换页面网格和播放器宽度，保持同一 VideoPlayer 和媒体节点。移动播放器贴边，16:9 媒体下方独立放置控件，按钮至少 44px；窄至 320px 时允许控件换行。清晰度、倍速、字幕菜单沿用原焦点和选择逻辑；全屏时恢复媒体覆盖层控件。所有播放器业务保留在原实现，没有修改 HLS 初始化、source、事件生命周期或续播。
+
+Creator Channel 使用抽象线框品牌背景与真实头像、姓名、简介、加入时间和三项统计。自己频道仅“管理投稿”为主操作，“编辑资料”“创作者中心”为次操作。作品复用 standard VideoCard，网格桌面三列、平板两列、<=700px 单列；无投稿复用 WATCH editorial empty state，不新增排序、Tabs 或 banner 能力。编辑资料 Dialog 只通过页面 scoped CSS 对齐表面和边框。
+
+Phase 3.1 将频道几何线框改为身份区右侧的绝对定位背景：透明、无横幅边框、不占独立横幅高度；头像与 identity 和几何共享同一段落。移动端隐藏背景签名文字，保留轻线框，统计与操作保持原顺序。
+
+Related 保留原同分类 popular 请求、排除当前 ID 与 slice 逻辑，轻量条目复用 VideoCover 和 compact 占位密度，仅显示两行标题及作者/播放数。举报保持 inline，评论保留现有创建、计数及本人/视频作者删除权限，不新增回复或点赞。
+
+Related compact 缺图保留 26px GVideo mark 与轻几何框，不显示 placeholder 文案；规则仅作用于播放页 Related，不改变 VideoCover 加载／失败状态或其他卡片。浅色播放页画布与输入表面沿用 Phase 2.1 的 `#eeede9` / `#faf9f6`；标题、meta、creator、简介、评论与 Related 继承 light token，播放器保持独立暗色媒体表面。视觉 E2E 检查 token、最终背景颜色与 dark/light 刷新恢复。
+
 - 首页 Featured 与 Latest 去重；数据不足时减少 section，搜索/分类/分页保持真实结果。
 - 热门使用当前 popular API；不伪造周月榜、涨跌或趋势。
 - 播放页目标顺序为 PLAYER、TITLE、META、INTERACTION、CREATOR、DESCRIPTION、COMMENTS；Related 桌面在右侧，窄屏在后。
 - 播放器业务不重写，保留 HLS、fallback、quality、speed、subtitle、volume、fullscreen、theater、PiP、resume、keyboard 与生命周期清理。
 - 字幕创作与管理仅在投稿管理中，播放页只选择已有轨道。
-- 作者头部使用已有封面或中性表面，不添加 banner 字段。
+- 作者头部使用抽象品牌背景和真实头像，禁止把视频封面冒充作者 banner，不添加 banner 字段。
 - 统计只读取 CreatorStats。可见性与处理状态存在交叉，不能混成一个互斥分布。
 - 投稿行操作逐步迁移到上下文菜单，保留弹窗、焦点返回、轮询、失败重试、分页与删除确认。
 - 发布可采用视觉阶段，仍然一次 FormData 提交；保留全部字段、限制、进度、取消和 beforeunload。

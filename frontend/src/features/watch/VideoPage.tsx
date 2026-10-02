@@ -1,8 +1,9 @@
 import { FormEvent, useEffect, useState } from "react";
-import { Bookmark, Check, Clock3, Eye, Film, Flag, Heart, LayoutDashboard, Play, Send, Share2, Trash2, UserRound, X } from "lucide-react";
+import { Bookmark, Check, Clock3, Eye, Film, Flag, Heart, LayoutDashboard, Send, Share2, Trash2, UserRound, X } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api } from "../../shared/api/client";
 import { Avatar } from "../../shared/components/Avatar";
+import { VideoCover } from "../../shared/components/VideoCover";
 import { ErrorBlock, LoadingBlock } from "../../shared/components/Feedback";
 import { ProcessingBadge, ProcessingProgress } from "../../shared/components/Processing";
 import { errorMessage } from "../../shared/lib/errors";
@@ -176,15 +177,12 @@ export function VideoPage({ user }: { user: User | null }) {
   if (!video) return null;
 
   return (
-    <div className="page watch-page">
+    <div className="page watch-page gv-watch-page">
       <section className={`watch-layout ${theaterMode ? "theater-mode" : ""}`}>
         <div className="watch-main">
-          <div className="watch-title-row">
-            <div><p className="eyebrow">{video.category}</p><h1>{video.title}</h1><div className="watch-meta"><span><Eye size={15} />{formatCount(video.views_count)} 播放</span><span><Clock3 size={15} />{formatDate(video.created_at)}</span>{video.processing_status === "ready" && video.source_width > 0 && <span>{video.source_width} × {video.source_height}</span>}</div></div>
-          </div>
           <VideoPlayer video={video} theaterMode={theaterMode} onTheaterModeChange={setTheaterMode} />
           {video.processing_status !== "ready" && (
-            <div className={`processing-notice ${video.processing_status}`}>
+            <div className={`processing-notice ${video.processing_status}`} role="status" aria-live="polite">
               <div className="processing-notice-copy">
                 <ProcessingBadge video={video} />
                 <span>{video.processing_status === "failed" ? (video.processing_error || "媒体处理失败，原始文件仍可播放。") : "原始文件已保存并可播放，后台正在生成自适应清晰度。"}</span>
@@ -192,10 +190,14 @@ export function VideoPage({ user }: { user: User | null }) {
               {(video.processing_status === "pending" || video.processing_status === "processing") && <ProcessingProgress video={video} />}
             </div>
           )}
+          <div className="watch-title-row">
+            <p className="eyebrow">WATCH / {video.category}</p><h1 title={video.title}>{video.title}</h1>
+          </div>
           <div className="watch-action-row">
+            <div className="watch-meta"><span><Eye size={15} />{formatCount(video.views_count)} 播放</span><span><Clock3 size={15} />{formatDate(video.created_at)}</span>{video.processing_status === "ready" && video.source_width > 0 && <span>{video.source_width} × {video.source_height}</span>}</div>
             <div className="watch-actions">
-              <button className={video.liked ? "active" : ""} disabled={busy === "like"} onClick={() => toggle("like")}><Heart size={19} fill={video.liked ? "currentColor" : "none"} />{formatCount(video.likes_count)}</button>
-              <button className={video.favorited ? "active" : ""} disabled={busy === "favorite"} onClick={() => toggle("favorite")}><Bookmark size={19} fill={video.favorited ? "currentColor" : "none"} />{formatCount(video.favorites_count)}</button>
+              <button aria-label="点赞" aria-pressed={video.liked} className={video.liked ? "active" : ""} disabled={busy === "like"} onClick={() => toggle("like")}><Heart size={19} fill={video.liked ? "currentColor" : "none"} />{formatCount(video.likes_count)}</button>
+              <button aria-label="收藏" aria-pressed={video.favorited} className={video.favorited ? "active" : ""} disabled={busy === "favorite"} onClick={() => toggle("favorite")}><Bookmark size={19} fill={video.favorited ? "currentColor" : "none"} />{formatCount(video.favorites_count)}</button>
               <button onClick={shareVideo}><Share2 size={19} />分享</button>
               <button onClick={() => { if (requireUser()) setReportOpen(true); }}><Flag size={18} />举报</button>
             </div>
@@ -223,11 +225,12 @@ export function VideoPage({ user }: { user: User | null }) {
               </button>
             )}
           </div>
-          {video.description && <p className="video-description">{video.description}</p>}
+          {video.description && <section className="gv-watch-description" aria-label="视频简介"><p className="eyebrow">DESCRIPTION / 简介</p><p className="video-description">{video.description}</p></section>}
           <section className="comment-section" aria-labelledby="comments-title">
             <div className="comment-heading"><h2 id="comments-title">评论</h2><span>{video.comments_count}</span></div>
             <form className="comment-form" onSubmit={submitComment}>
-              <textarea value={content} onChange={(event) => setContent(event.target.value)} maxLength={500} placeholder={user ? "说说你的想法" : "登录后参与讨论"} disabled={!user} />
+              {user && <Avatar username={user.username} src={user.avatar_url} size="small" />}
+              <textarea aria-label="评论内容" value={content} onChange={(event) => setContent(event.target.value)} maxLength={500} placeholder={user ? "说说你的想法" : "登录后参与讨论"} disabled={!user} />
               <button className="primary-button compact" disabled={!content.trim() || busy === "comment"}><Send size={16} />发布</button>
             </form>
             <div className="comment-list">
@@ -236,7 +239,7 @@ export function VideoPage({ user }: { user: User | null }) {
           </section>
         </div>
         <aside className="related-panel" aria-labelledby="related-title">
-          <div className="related-heading"><div><p className="eyebrow">继续观看</p><h2 id="related-title">相关推荐</h2></div><Link to={`/popular?category=${encodeURIComponent(video.category)}`}>更多</Link></div>
+          <div className="related-heading"><div><p className="eyebrow">NEXT UP / 继续观看</p><h2 id="related-title">相关推荐</h2></div><Link to={`/popular?category=${encodeURIComponent(video.category)}`}>更多</Link></div>
           {relatedLoading ? (
             <div className="related-list">{Array.from({ length: 5 }, (_, index) => <div className="related-skeleton" key={index}><span /><div><i /><i /></div></div>)}</div>
           ) : relatedVideos.length ? (
@@ -252,15 +255,14 @@ export function VideoPage({ user }: { user: User | null }) {
 
 export function RelatedVideoCard({ video }: { video: Video }) {
   return (
-    <article className="related-video">
-      <Link to={`/video/${video.id}`} className="related-cover">
-        {video.cover_url ? <img src={video.cover_url} alt="" loading="lazy" /> : <div className="cover-fallback"><Play size={22} fill="currentColor" /></div>}
+    <article className="related-video gv-video-card--compact">
+      <Link to={`/video/${video.id}`} className="related-cover" aria-label={`播放 ${video.title}`}>
+        <VideoCover src={video.cover_url} />
         <span className="duration">{formatDuration(video.duration_seconds)}</span>
       </Link>
       <div className="related-copy">
         <Link to={`/video/${video.id}`} className="related-title">{video.title}</Link>
-        <Link to={`/users/${video.user_id}`} className="related-author"><Avatar username={video.username} src={video.avatar_url} size="small" /><span>{video.username}</span></Link>
-        <span><Eye size={13} />{formatCount(video.views_count)} 播放</span>
+        <div className="gv-related-meta"><Link to={`/users/${video.user_id}`} className="related-author"><span>{video.username}</span></Link><span>{formatCount(video.views_count)} 播放</span></div>
       </div>
     </article>
   );

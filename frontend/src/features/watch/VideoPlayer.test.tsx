@@ -1,12 +1,16 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { VideoPlayer } from "./VideoPlayer";
 import type { Video } from "../../types";
 
 const { loadHLSModule } = vi.hoisted(() => ({ loadHLSModule: vi.fn() }));
+// VideoPage now loads the real player before this suite in the shared worker.
+// Clear that module so these existing HLS mocks bind to this suite's player.
+vi.hoisted(() => vi.resetModules());
 vi.mock("./hlsLoader", () => ({ loadHLSModule }));
+afterAll(() => vi.resetModules());
 
 const video: Video = {
   id: 1, user_id: 1, username: "测试用户", avatar_url: "", title: "测试视频", description: "", category: "科技",
@@ -330,5 +334,87 @@ describe("VideoPlayer HLS lifecycle", () => {
     view.unmount();
     expect(signal?.aborted).toBe(true);
     await act(async () => pending.resolve(new Response("#EXTM3U")));
+  });
+});
+
+describe("VideoPlayer Phase 3 presentation regression", () => {
+  beforeEach(() => {
+    loadHLSModule.mockReset();
+    localStorage.clear();
+    vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockReturnValue("");
+    vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => undefined);
+  });
+  afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear(); });
+
+  it("宽屏切换保留媒体节点、播放源、时间和 HLS 实例", async () => {
+    const hls = fakeHLSModule();
+    loadHLSModule.mockResolvedValue(hls.module);
+    renderPlayer(hlsVideo);
+    await waitFor(() => expect(hls.instance.attachMedia).toHaveBeenCalledOnce());
+    const media = document.querySelector("video")!;
+    media.currentTime = 30;
+    const source = media.getAttribute("src");
+    for (let index = 0; index < 2; index += 1) {
+      fireEvent.click(screen.getByRole("button", { name: "宽屏模式" }));
+      expect(document.querySelector("video")).toBe(media);
+      expect(media.currentTime).toBe(30);
+      expect(media.getAttribute("src")).toBe(source);
+    }
+    expect(hls.instance.attachMedia).toHaveBeenCalledOnce();
+    expect(hls.instance.destroy).not.toHaveBeenCalled();
+  });
+
+  it("清晰度菜单选择真实 HLS level 并归还焦点", async () => {
+    const hls = fakeHLSModule();
+    loadHLSModule.mockResolvedValue(hls.module);
+    renderPlayer(hlsVideo);
+    await waitFor(() => expect(hls.instance.attachMedia).toHaveBeenCalled());
+    act(() => hls.handlers.get("manifest")?.({}, { levels: [{ height: 360 }, { height: 720 }] }));
+    fireEvent.click(screen.getByRole("button", { name: "选择视频清晰度，当前自动" }));
+    fireEvent.click(screen.getByRole("button", { name: "720p" }));
+    expect(hls.instance.currentLevel).toBe(1);
+    const trigger = screen.getByRole("button", { name: "选择视频清晰度，当前720p" });
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole("button", { name: "自动" }));
+    expect(hls.instance.currentLevel).toBe(-1);
+  });
+
+  it("倍速选择实际更新媒体且 Escape 归还菜单焦点", async () => {
+    renderPlayer();
+    const trigger = screen.getByRole("button", { name: "播放速度" });
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole("button", { name: "1.5x" }));
+    expect(document.querySelector("video")!.playbackRate).toBe(1.5);
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+    fireEvent.click(trigger);
+    fireEvent.keyDown(screen.getByRole("button", { name: "2x" }), { key: "Escape", code: "Escape" });
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+    expect(screen.queryByRole("group", { name: "选择播放速度" })).toBeNull();
+  });
+
+  it("续播、暂停保存与结束清理仍使用当前视频独立进度", () => {
+    localStorage.setItem("gvideo-progress-1", "30");
+    renderPlayer();
+    const media = document.querySelector("video")!;
+    Object.defineProperty(media, "duration", { configurable: true, value: 120 });
+    fireEvent.loadedMetadata(media);
+    expect(media.currentTime).toBe(30);
+    expect(screen.getByRole("status").textContent).toContain("已从 0:30 继续播放");
+    media.currentTime = 40.8;
+    fireEvent.pause(media);
+    expect(localStorage.getItem("gvideo-progress-1")).toBe("40");
+    fireEvent.ended(media);
+    expect(localStorage.getItem("gvideo-progress-1")).toBeNull();
+  });
+
+  it("原生 HLS 使用 manifest 真实清晰度而不加载 hls.js", async () => {
+    vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockReturnValue("probably");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=100000,RESOLUTION=640x360\n360/index.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=300000,RESOLUTION=1280x720\n720/index.m3u8")));
+    renderPlayer(hlsVideo);
+    expect(document.querySelector("video")!.getAttribute("src")).toBe(hlsVideo.hls_url);
+    fireEvent.click(await screen.findByRole("button", { name: "选择视频清晰度，当前自动" }));
+    expect(await screen.findByRole("button", { name: "720p" })).toBeTruthy();
+    expect(loadHLSModule).not.toHaveBeenCalled();
   });
 });

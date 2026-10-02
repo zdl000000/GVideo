@@ -7,7 +7,8 @@ import { formatCount, formatJoinDate, pageFrom } from "../../shared/lib/format";
 import { Avatar } from "../../shared/components/Avatar";
 import { VideoCard } from "../../shared/components/VideoCard";
 import { Pagination } from "../../shared/components/Pagination";
-import { LoadingBlock, ErrorBlock, EmptyState } from "../../shared/components/Feedback";
+import { LoadingBlock, ErrorBlock } from "../../shared/components/Feedback";
+import { WatchEmptyState } from "../../shared/components/WatchEmptyState";
 import type { CreatorProfile, User, VideoPage as VideoPageData } from "../../types";
 import { EditProfileDialog } from "./EditProfileDialog";
 
@@ -75,11 +76,12 @@ export function CreatorPage({ user, onUserUpdated }: { user: User | null; onUser
   const isSelf = user?.id === profile.id;
 
   return (
-    <div className="page creator-page">
+    <div className="page creator-page gv-channel-page">
+      <div className="gv-channel-backdrop" aria-hidden="true"><span /><span>WATCH / CREATE / SHARE</span></div>
       <section className="creator-hero" aria-labelledby="creator-name">
         <Avatar username={profile.username} src={profile.avatar_url} size="large" className="creator-hero-avatar" />
         <div className="creator-identity">
-          <p className="eyebrow">作者空间</p>
+          <p className="eyebrow">CREATOR / CHANNEL</p>
           <h1 id="creator-name">{profile.username}</h1>
           <p>{profile.bio || "这位创作者还没有填写个人简介。"}</p>
           <span className="creator-joined"><Clock3 size={14} />{formatJoinDate(profile.created_at)} 加入</span>
@@ -106,9 +108,9 @@ export function CreatorPage({ user, onUserUpdated }: { user: User | null; onUser
       {error && <p className="inline-error creator-error">{error}</p>}
       <section className="creator-content-head"><div><p className="eyebrow">全部投稿</p><h2>{profile.username} 的作品</h2></div><span>共 {result.total} 条</span></section>
       {result.items.length ? (
-        <><section className="video-grid">{result.items.map((video) => <VideoCard video={video} key={video.id} />)}</section><Pagination page={result.page} pageSize={result.page_size} total={result.total} hasNext={result.has_next} onPageChange={setPage} /></>
+        <><section className="video-grid" aria-label="作者作品">{result.items.map((video) => <VideoCard video={video} variant="standard" key={video.id} />)}</section><Pagination page={result.page} pageSize={result.page_size} total={result.total} hasNext={result.has_next} onPageChange={setPage} /></>
       ) : (
-        <EmptyState icon={<Film size={28} />} title="还没有公开投稿" text={isSelf ? "发布第一条作品，让个人空间丰富起来。" : "这位创作者发布作品后会显示在这里。"} action={isSelf ? <Link to="/upload" className="primary-button"><Upload size={17} />发布视频</Link> : <Link to="/popular" className="secondary-button"><Compass size={17} />浏览热门</Link>} />
+        <WatchEmptyState eyebrow="01 / WORKS" icon={<Film size={28} />} title="还没有公开投稿" text={isSelf ? "发布第一条作品，让个人空间丰富起来。" : "这位创作者发布作品后会显示在这里。"} action={isSelf ? <Link to="/upload" className="primary-button"><Upload size={17} />发布视频</Link> : <Link to="/popular" className="secondary-button"><Compass size={17} />浏览热门</Link>} />
       )}
       {editingProfile && (
         <EditProfileDialog
