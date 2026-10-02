@@ -8,4 +8,8 @@
 @import "./styles/responsive.css";
 @import "./styles/watch-playback.css";
 @import "./styles/studio-workspace.css";
+@import "./styles/publish.css";
+@import "./styles/auth-experience.css";
+@import "./styles/notifications.css";
+@import "./styles/governance.css";
 @import "./styles/motion.css";

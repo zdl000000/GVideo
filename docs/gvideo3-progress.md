@@ -1,13 +1,24 @@
 # GVideo 3.0 重构进度
 
-更新日期：2026-10-02。
+更新日期：2026-10-03。
 
 ## 当前范围
 
+Phase 5 — PUBLISH / AUTH / NOTIFICATIONS / ADMIN 已由用户通过最终工程与视觉验收，作为稳定检查点封版，不再继续 Phase 5 调整。基线为 Phase 4 经 PR #41 squash merge 的 main `0642b13`，工作分支 `codex/gvideo3-publish-auth-activity-governance`。范围仅 /upload、/auth、/notifications、/admin/reports 与四份 scoped CSS、必要测试、规范和验收报告，没有 Phase 6 内容。
+
+用户已授权为 Phase 5 创建独立提交、推送分支并创建 PR；须等待 Frontend、Backend、Backend Race 全部通过后 squash merge 到 main，再同步本地 main、origin/main 与 GitHub main。发布状态以 Git 和 GitHub 实际记录为准，完成后停止，不进入 Phase 6。提交仅保留源码、正式测试、设计规范和验收报告；tmp/、截图、Playwright artifacts、一次性预览、日志、敏感文件和构建产物排除。
+
+Publish 使用单页 MEDIA/STORY/COVER/SUBTITLE/VISIBILITY/PUBLISH 六视觉章节与原点击式 file input，不伪造草稿/自动保存/多步骤持久化。Upload、Notifications、Admin 的原 state/effect/handler 与 HEAD 归一化换行后逐字一致。Auth 提取原安全 next 规则供提交成功和 AuthRedirect 共用；站内 /video/1 允许，//evil.com 和 http://evil.com 回首页。App/Shell、WATCH、VideoPlayer/hlsLoader、Creator/Content Management、API/types/backend、依赖和默认浅色行为均未改。
+
+以下保留 Phase 5 发布前验收记录。独立 typecheck、19 文件/201 项 unit、build/HLS budget 已通过；Phase 5 E2E 为 50 passed、4 项重复截图采集条件 skip、0 failed（4.0m）。App/theme、Discovery、visual-polish、Playback、Studio 最终回归 70 passed、2 项既有设备条件 skip、0 failed（4.4m）。Auth 截图补采和原守卫复验 3 passed、1 项重复采集 skip。scripts/check.ps1 最终退出码 0，含 Go test/vet、201 项 unit（18.46s）、typecheck、build（35.26s）、HLS budget 和 diff 检查；HTTPS Compose 未设置 TLS 文件按规则跳过。18 张隔离截图位于忽略的 tmp/phase5-screenshots，没有注册/上传/通知/治理真实写入。完整 22 项说明和首轮失败/复验边界见 docs/gvideo3-phase5-acceptance.md。验收时暂存区为空，HEAD 为 0642b13；这些历史状态不代表后续 Git 发布结果。
+
+2026-10-03 继续暂停进度时发现 5173/8080 服务均停止，已恢复原 Vite 与 Docker backend，未构建新后端镜像、修改持久卷或清理任何数据。恢复后两服务 HTTP 200，backend healthy。服务不可用时启动的回归已中止并保留日志，服务恢复后重新运行。
+
+## Phase 4 历史验收与发布
 
 Phase 4 — STUDIO CREATOR OS 已由用户通过最终工程与视觉验收，Studio Dashboard、Content Management 与 Dialog workflow 作为稳定检查点封版，不再继续视觉调整。基线是 PR #40 squash 后 main `4aeadaf`，工作分支 `codex/gvideo3-studio-creator-os`。范围仅 /creator、/me/videos、三个行操作弹窗、SubtitleManager workspace 表现层、新内容行/菜单/空态、scoped studio-workspace.css 与测试文档；无 Phase 5 内容。
 
-用户已授权创建 Phase 4 独立提交、推送当前分支并创建 PR；须等待 Frontend、Backend、Backend Race 全部通过后 squash 合并到 main，再同步本地 main。发布状态以 Git 和 GitHub 为准，完成后停止，不进入 Phase 5。提交仅保留源码、测试、设计规范与验收报告；临时预览、隔离截图夹具、截图、日志及其他忽略产物不进入提交。
+Phase 4 已创建独立提交 `828ec8d`，经 PR #41 在 Frontend、Backend、Backend Race 全部通过后 squash 合并到 main `0642b13`，并完成本地同步。提交仅保留源码、测试、设计规范与验收报告；临时预览、隔离截图夹具、截图、日志及其他忽略产物不进入提交。以下保留本阶段验收时记录；本次 Phase 5 由用户另行明确授权。
 
 Dashboard 只展示真实 CreatorStats 分层累计数字，visibility 与 processing 独立。内容行保留原分页、2500ms polling、AbortController、请求取消；菜单 Dialog 回持久 trigger，保存焦点移到 cleanup 后。重试成功显示 pending/queued/0%，与既有后端重置一致；字幕 busy 状态通知父 Dialog，防止请求中关闭。所有受保护路径和依赖未修改。
 

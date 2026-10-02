@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
 import {
-  Bell,
   Bookmark,
   Check,
   CheckCheck,
   CircleAlert,
   CircleCheck,
   Heart,
+  LoaderCircle,
   MessageCircle,
   Users
 } from "lucide-react";
@@ -22,14 +22,32 @@ export const notificationCopy = (item: Notification) => {
   const actor = item.actor_username || "有用户";
   const title = item.video_title || "你的视频";
   switch (item.type) {
-    case "follow": return { title: `${actor} 关注了你`, detail: "有新的观众开始关注你的创作", icon: <Users size={18} /> };
-    case "like": return { title: `${actor} 点赞了《${title}》`, detail: "你的作品收到了一个赞", icon: <Heart size={18} /> };
-    case "favorite": return { title: `${actor} 收藏了《${title}》`, detail: "你的作品被加入收藏", icon: <Bookmark size={18} /> };
-    case "comment": return { title: `${actor} 评论了《${title}》`, detail: item.comment_preview || "查看这条新评论", icon: <MessageCircle size={18} /> };
-    case "processing_ready": return { title: `《${title}》已处理完成`, detail: "视频已经可以正常播放", icon: <CircleCheck size={18} /> };
-    case "processing_failed": return { title: `《${title}》处理失败`, detail: item.comment_preview || "请检查视频并重新尝试", icon: <CircleAlert size={18} /> };
+    case "follow": return { label: "关注", title: `${actor} 关注了你`, detail: "有新的观众开始关注你的创作", icon: <Users size={18} /> };
+    case "like": return { label: "点赞", title: `${actor} 点赞了《${title}》`, detail: "你的作品收到了一个赞", icon: <Heart size={18} /> };
+    case "favorite": return { label: "收藏", title: `${actor} 收藏了《${title}》`, detail: "你的作品被加入收藏", icon: <Bookmark size={18} /> };
+    case "comment": return { label: "评论", title: `${actor} 评论了《${title}》`, detail: item.comment_preview || "查看这条新评论", icon: <MessageCircle size={18} /> };
+    case "processing_ready": return { label: "处理完成", title: `《${title}》已处理完成`, detail: "视频已经可以正常播放", icon: <CircleCheck size={18} /> };
+    case "processing_failed": return { label: "处理失败", title: `《${title}》处理失败`, detail: item.comment_preview || "请检查视频并重新尝试", icon: <CircleAlert size={18} /> };
   }
 };
+
+function NotificationRow({ item, busy, onRead }: { item: Notification; busy: number | "all" | null; onRead: (item: Notification) => Promise<void> }) {
+  const copy = notificationCopy(item);
+  const target = item.video_id ? `/video/${item.video_id}` : item.actor_id ? `/users/${item.actor_id}` : "/notifications";
+  const marking = busy === item.id;
+  return (
+    <article className={`gv-notification-row gv-notification-row--${item.type} ${item.read_at ? "read" : "unread"}`} aria-busy={marking}>
+      <span className="gv-notification-icon" aria-hidden="true">{copy.icon}</span>
+      <div className="gv-notification-copy">
+        <div className="gv-notification-meta"><span>{copy.label}</span>{!item.read_at && <span className="gv-notification-unread"><i aria-hidden="true" />未读</span>}<time dateTime={item.created_at}>{formatDate(item.created_at)}</time></div>
+        <Link to={target} onClick={() => onRead(item)}>{copy.title}</Link>
+        <p>{copy.detail}</p>
+        {marking && <span className="gv-notification-read-status" role="status">正在标记已读</span>}
+      </div>
+      {!item.read_at && <button type="button" className="gv-notification-read-button" onClick={() => onRead(item)} disabled={busy !== null} title="标记已读" aria-label="标记已读">{marking ? <LoaderCircle size={18} className="gv-notification-busy-icon" aria-hidden="true" /> : <Check size={18} aria-hidden="true" />}</button>}
+    </article>
+  );
+}
 
 export function NotificationCenterPage() {
   const [params, setParams] = useSearchParams();
@@ -85,28 +103,18 @@ export function NotificationCenterPage() {
   };
 
   return (
-    <div className="page notifications-page">
-      <section className="page-heading heading-row notification-heading">
-        <div><p className="eyebrow">消息动态</p><h1>通知中心</h1><p>{result.unread_count ? `${result.unread_count} 条未读通知` : "所有通知都已读"}</p></div>
-        <button className="secondary-button" onClick={markAll} disabled={!result.unread_count || Boolean(busy)}><CheckCheck size={17} />全部标记已读</button>
+    <div className="page gv-notification-center">
+      <section className="gv-notification-heading" aria-labelledby="notification-center-title">
+        <div><p className="eyebrow">WATCH / ACTIVITY</p><h1 id="notification-center-title">通知中心</h1><p className="gv-notification-count" aria-live="polite">{loading ? "正在读取通知动态" : result.unread_count ? `${result.unread_count} 条未读通知` : "所有通知都已读"}</p></div>
+        <button type="button" className="secondary-button" onClick={markAll} disabled={loading || !result.unread_count || busy !== null}>{busy === "all" ? <LoaderCircle size={17} className="gv-notification-busy-icon" aria-hidden="true" /> : <CheckCheck size={17} aria-hidden="true" />}{busy === "all" ? "正在标记全部已读" : "全部标记已读"}</button>
       </section>
-      {error && <p className="inline-error">{error}</p>}
+      {error && <p className="inline-error" role="alert">{error}</p>}
       {loading ? <LoadingBlock label="正在读取通知" /> : result.items.length ? (
-        <section className="notification-list" aria-label="通知列表">
-          {result.items.map((item) => {
-            const copy = notificationCopy(item);
-            const target = item.video_id ? `/video/${item.video_id}` : item.actor_id ? `/users/${item.actor_id}` : "/notifications";
-            return (
-              <article key={item.id} className={`notification-row ${item.read_at ? "read" : "unread"}`}>
-                <span className={`notification-icon ${item.type}`}>{copy.icon}</span>
-                <div className="notification-copy"><Link to={target} onClick={() => markRead(item)}>{copy.title}</Link><p>{copy.detail}</p><time>{formatDate(item.created_at)}</time></div>
-                {!item.read_at && <button className="icon-button" onClick={() => markRead(item)} disabled={Boolean(busy)} title="标记已读" aria-label="标记已读"><Check size={18} /></button>}
-              </article>
-            );
-          })}
+        <section className="gv-notification-feed" aria-label="通知列表">
+          {result.items.map((item) => <NotificationRow key={item.id} item={item} busy={busy} onRead={markRead} />)}
         </section>
-      ) : <div className="notification-empty"><Bell size={28} /><strong>暂时没有通知</strong><span>新的关注、互动和处理状态会显示在这里</span></div>}
-      <Pagination page={result.page} pageSize={result.page_size} total={result.total} hasNext={result.has_next} onPageChange={(value) => setParams(value > 1 ? { page: String(value) } : {})} />
+      ) : !error && <section className="gv-notification-empty" aria-labelledby="notification-empty-title"><p className="eyebrow">ACTIVITY / 00</p><h2 id="notification-empty-title">暂时没有通知</h2><p>新的关注、互动和处理状态会显示在这里。</p><span className="gv-notification-empty-motif" aria-hidden="true"><i /><i /><i /></span></section>}
+      <Pagination label="通知分页" page={result.page} pageSize={result.page_size} total={result.total} hasNext={result.has_next} onPageChange={(value) => setParams(value > 1 ? { page: String(value) } : {})} />
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Check, Clock3, Flag, X } from "lucide-react";
+import { Check, CircleCheck, CircleX, Clock3, Flag, ScanEye, X } from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../../shared/api/client";
 import { LoadingBlock } from "../../shared/components/Feedback";
@@ -32,6 +32,39 @@ export const reportFilters: Array<{ value: "" | VideoReportStatus; label: string
 
 export const isReportStatus = (value: string | null): value is VideoReportStatus =>
   value === "pending" || value === "reviewed" || value === "resolved" || value === "dismissed";
+
+const reportStatusIcons = { pending: Clock3, reviewed: ScanEye, resolved: CircleCheck, dismissed: CircleX };
+
+function ReportRow({ report, busy, onReview }: { report: VideoReport; busy: number | null; onReview: (report: VideoReport, status: VideoReportStatus) => void }) {
+  const StatusIcon = reportStatusIcons[report.status];
+  return (
+    <article className="gv-report-row" aria-labelledby={`report-title-${report.id}`} aria-busy={busy === report.id} data-status={report.status}>
+      <div className="gv-report-state">
+        <span className={`gv-report-status gv-report-status--${report.status}`}><StatusIcon size={14} aria-hidden="true" />{reportStatusLabels[report.status]}</span>
+        <span className="gv-report-id">REPORT / #{report.id}</span>
+      </div>
+      <div className="gv-report-content">
+        <h2 id={`report-title-${report.id}`}><Link to={`/video/${report.video_id}`}>{report.video_title || `视频 #${report.video_id}`}</Link></h2>
+        <p className="gv-report-reason"><Flag size={13} aria-hidden="true" /><span>{reportReasonLabels[report.reason] || report.reason}</span></p>
+        <p className={`gv-report-detail${report.detail ? "" : " gv-report-detail--empty"}`}>{report.detail || "举报人未填写补充说明"}</p>
+        <div className="gv-report-people">
+          <span>举报人 <Link to={`/users/${report.user_id}`}>{report.reporter_username || `用户 #${report.user_id}`}</Link></span>
+          <span>作者 <Link to={`/users/${report.video_author_id}`}>{report.video_author || `用户 #${report.video_author_id}`}</Link></span>
+        </div>
+        <div className="gv-report-dates">
+          <span>提交 <time dateTime={report.created_at}>{formatDate(report.created_at)}</time></span>
+          <span>更新 <time dateTime={report.updated_at}>{formatDate(report.updated_at)}</time></span>
+        </div>
+      </div>
+      <div className="gv-report-actions" role="group" aria-label={`处理举报 #${report.id}`}>
+        <button type="button" disabled={Boolean(busy) || report.status === "reviewed"} onClick={() => onReview(report, "reviewed")}><Clock3 size={15} aria-hidden="true" />审核中</button>
+        <button type="button" disabled={Boolean(busy) || report.status === "resolved"} onClick={() => onReview(report, "resolved")}><Check size={15} aria-hidden="true" />处理完成</button>
+        <button type="button" className="gv-report-dismiss" disabled={Boolean(busy) || report.status === "dismissed"} onClick={() => onReview(report, "dismissed")}><X size={15} aria-hidden="true" />驳回</button>
+        {busy === report.id && <span className="gv-report-busy" role="status">正在更新举报状态…</span>}
+      </div>
+    </article>
+  );
+}
 
 export function AdminReportsPage() {
   const [params, setParams] = useSearchParams();
@@ -84,48 +117,28 @@ export function AdminReportsPage() {
   };
 
   return (
-    <div className="page admin-reports-page">
-      <section className="page-heading admin-report-heading">
-        <div><p className="eyebrow">内容治理</p><h1>举报审核</h1><p>共 {result.total} 条记录，优先处理待审核内容</p></div>
-        <div className="admin-report-toolbar" aria-label="举报状态筛选">
-          <div className="segmented-control">
+    <div className="page admin-reports-page gv-governance-page">
+      <header className="page-heading gv-governance-heading">
+        <div><p className="eyebrow">GOVERNANCE / REPORTS</p><h1>举报审核</h1><p>内容治理 · 优先处理待审核内容</p></div>
+        <div className="gv-governance-count"><strong>{result.total.toLocaleString("zh-CN")}</strong><span>举报记录</span></div>
+      </header>
+      <div className="gv-governance-filter-bar">
+        <div className="gv-governance-filters" role="group" aria-label="举报状态筛选">
             {reportFilters.map((filter) => (
               <button key={filter.value || "all"} type="button" className={status === filter.value ? "active" : ""} onClick={() => updateQuery(filter.value)} aria-pressed={status === filter.value}>{filter.label}</button>
             ))}
-          </div>
         </div>
-      </section>
-      {error && <p className="inline-error admin-report-error">{error}</p>}
+        <span className="gv-governance-filter-note">{status ? reportStatusLabels[status] : "全部状态"}</span>
+      </div>
+      {error && <p className="inline-error admin-report-error" role="alert">{error}</p>}
       {loading ? <LoadingBlock label="正在读取举报记录" /> : result.items.length ? (
-        <section className="admin-report-list" aria-label="举报记录">
+        <section className="gv-governance-records" aria-label="举报记录">
+          <div className="gv-governance-columns" aria-hidden="true"><span>状态 / 编号</span><span>举报内容</span><span>审核操作</span></div>
           {result.items.map((report) => (
-            <article key={report.id} className="admin-report-row">
-              <div className="admin-report-status-column">
-                <span className={`admin-report-status ${report.status}`}>{reportStatusLabels[report.status]}</span>
-                <span>#{report.id}</span>
-              </div>
-              <div className="admin-report-main">
-                <div className="admin-report-title">
-                  <strong>{reportReasonLabels[report.reason] || report.reason}</strong>
-                  <Link to={`/video/${report.video_id}`}>{report.video_title || `视频 #${report.video_id}`}</Link>
-                </div>
-                <p className={`admin-report-detail ${report.detail ? "" : "empty"}`}>{report.detail || "举报人未填写补充说明"}</p>
-                <div className="admin-report-meta">
-                  <span>作者 <Link to={`/users/${report.video_author_id}`}>{report.video_author || `用户 #${report.video_author_id}`}</Link></span>
-                  <span>举报人 <Link to={`/users/${report.user_id}`}>{report.reporter_username || `用户 #${report.user_id}`}</Link></span>
-                  <span>提交 {formatDate(report.created_at)}</span>
-                  <span>更新 {formatDate(report.updated_at)}</span>
-                </div>
-              </div>
-              <div className="admin-report-actions" aria-label={`处理举报 #${report.id}`}>
-                <button type="button" disabled={Boolean(busy) || report.status === "reviewed"} onClick={() => review(report, "reviewed")}><Clock3 size={15} />审核中</button>
-                <button type="button" disabled={Boolean(busy) || report.status === "resolved"} onClick={() => review(report, "resolved")}><Check size={15} />处理完成</button>
-                <button type="button" className="dismiss" disabled={Boolean(busy) || report.status === "dismissed"} onClick={() => review(report, "dismissed")}><X size={15} />驳回</button>
-              </div>
-            </article>
+            <ReportRow key={report.id} report={report} busy={busy} onReview={review} />
           ))}
         </section>
-      ) : <div className="admin-report-empty"><Flag size={28} /><strong>当前筛选下没有举报</strong><span>新的举报提交后会显示在这里</span></div>}
+      ) : <section className="gv-governance-empty"><p className="eyebrow">REPORTS / 00</p><Flag size={26} aria-hidden="true" /><h2>当前筛选下没有举报</h2><p>新的举报提交后会显示在这里</p></section>}
       <Pagination page={result.page} pageSize={result.page_size} total={result.total} hasNext={result.has_next} label="举报记录分页" onPageChange={(value) => updateQuery(status, value)} />
     </div>
   );

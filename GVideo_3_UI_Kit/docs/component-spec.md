@@ -127,3 +127,35 @@ Variants:
 - 字幕管理只在 workspace 调用中启用新样式。onBusyChange 将既有上传/默认/删除请求状态告知 SubtitleDialog；业务 API/FormData/track list 不变。SubtitleTrack 不提供原始文件名/格式字段，所以不展示虚构 file/format。
 - StudioEmptyState 只提供真实发布入口，没有 checklist/完成率。Loading 使用内容行同构骨架，沿用全局 reduced-motion。
 - <=700px 用封面+标题、状态/可见范围、播放/互动、日期、完整行进度的阅读顺序，隐藏桌面列标题；标题两行并允许连续 ASCII 安全换行。
+
+## Phase 5 — 已实现的发布、账号、通知与举报组件
+
+### Publish
+
+- `/upload` 保留一个表单与一次提交，以 MEDIA、STORY、COVER、SUBTITLE、VISIBILITY、PUBLISH 六个编号视觉章节组织阅读。章节不具备向导步骤、草稿或独立保存行为。
+- 文件入口是可用键盘操作的原生 button，点击现有 file input 选择或更换文件；未实现拖放，不以 dropzone 文案暗示拖放能力。选择后显示真实文件名、大小与类型。
+- 空封面复用 `VideoCover` 品牌占位；已选封面展示本地 object URL 预览，保留原 create/revoke 生命周期，不生成假视频内容。
+- 字幕入口只接受单条初始中文字幕；同一次 FormData 继续发送 `subtitle_language=zh-CN`、`subtitle_label=中文`。更多轨道管理仍通过已有投稿管理字幕弹窗完成。
+- 一次 FormData 保留 `title`、`description`、`category`、`visibility`、`video`，可选 `cover` 与 `subtitle`。标题/简介原生限制、分类加载、可见范围 map/help、上传回调、AbortController、取消后内容保留、busy 时 beforeunload 与成功跳转 `/video/:id` 保留。
+- 主提交与取消操作复用 `Button`。busy 时文件选择、表单和可见范围不可改；进度使用真实回调与 `progressbar` 语义，明确区分文件上传和随后后台处理。总量未知的回调不提供 `aria-valuenow`；原 API client 对不可计算长度事件的处理保持不变，不承诺每次上传都有百分比。
+
+### Auth
+
+- `/auth` 使用品牌叙事与紧凑表单双列布局；移动端压缩装饰，优先显示登录/注册表单。已有 GVideo mark 与轻 frame geometry 属于品牌装饰，不作为用户内容。
+- 登录与注册仍是同一个页面内的两个模式，复用 `Button` 与现有 login/register API、onAuth。原生 label、username/current-password/new-password autocomplete、busy 锁定、inline alert/status 保留明确反馈；无 OAuth、忘记密码或虚构认证入口。
+- 本地 `authTarget` 统一登录/注册成功和已登录回跳：接受 `/video/1` 等站内路径，拒绝 `//evil.com`、`http://evil.com`。App 的保护路由和 Shell 不改。
+
+### Activity
+
+- `/notifications` 的本地 `NotificationRow` 使用语义 article、细分割线与紧凑信息层级；仍使用唯一 `notificationCopy` 映射，并为关注、点赞、收藏、评论、处理完成、处理失败提供文字类别和图标。
+- 未读状态由背景、圆点和“未读”文字共同表达；单条已读按钮为 44px，busy 状态提供文本，全部已读沿用原 API。保留 page_size=20、page 查询、视频/作者链接和 `gvideo-notifications-changed` 事件，使全局通知铃继续更新。
+- 空状态用 ACTIVITY / 00、标题、留白和弱几何构成；无新 CTA、筛选、设置或实时功能。复用现有 `Pagination`、`LoadingBlock`、错误与日期格式工具。
+
+### Governance
+
+- `/admin/reports` 的本地 `ReportRow` 使用状态/编号、举报内容、审核操作三列，移动端依次阅读状态、内容、操作，不建立通用 DataGrid 体系。
+- 四个现有状态 pending/reviewed/resolved/dismissed 保留原语义，分别使用文字、图标和色彩。垃圾信息、不当内容、版权问题、其他及未知原因回退保留；标题、详情、举报人、作者、提交/更新时间使用真实字段。
+- 审核中、处理完成、驳回仍调用原 review API；请求期间保留全局 busy 防重复操作。状态变更后沿用原本当前行更新行为，不擅自从当前筛选结果移除该行。
+- 状态/page URL、page_size=20、请求取消、管理员权限保护、加载/错误/空状态与 `Pagination` 保留。没有搜索、批量操作、封禁或删除能力。
+
+仅增加页面内组合与 scoped 样式；不改 App/Shell、WATCH、Playback/Player/HLS、已验收 Studio 页面、API client、types、backend、依赖或全局主题初始化。实际验证与边界见 [Phase 5 验收报告](../../docs/gvideo3-phase5-acceptance.md)。

@@ -166,3 +166,25 @@ Studio:
 - 内容行普通桌面最小高度 110px；实际处理进度或错误占完整附加行。封面保持 16:9，共享品牌占位状态，不伪造视频内容。
 - Dialog 保留原焦点隔离、忙碌保护、确认警告和请求反馈；深浅主题都使用所在 workspace 的 surface/field，不固定成深色卡。
 - 产品默认行为仍是无合法保存值时 light；已保存 dark/light 仍恢复。视觉 dark-first 不代表默认行为变更。
+
+## Phase 5 — 四个页面的视觉应用范围
+
+Phase 5 使用四份新增 CSS，不整体复制或重写旧样式：
+
+| CSS | 作用域 | 视觉职责 |
+| --- | --- | --- |
+| `publish.css` | `.gvideo-publish-page`，及包含此页的 StudioShell | 六个编号视觉章节、选择文件、真实封面预览、字幕入口、可见范围、上传进度和提交操作 |
+| `auth-experience.css` | `.gv-auth-experience`，及包含此页的 AuthShell | 桌面品牌叙事/表单双列、轻几何品牌图形、移动首屏表单、模式/错误/busy |
+| `notifications.css` | `.gv-notification-center`，及此页的浅色 WatchShell | 紧凑活动行、未读层级、类别图标、标记反馈、editorial empty state |
+| `governance.css` | `.gv-governance-page`，及包含此页的 StudioShell | 状态/编号与内容/操作列、文字+图标状态、筛选栏、紧凑记录、移动阅读顺序 |
+
+- Dark 延续品牌语义令牌，canvas 为 `#080a0d`。通知的 dark WATCH Shell 允许透明并继承 body canvas；验收须检查实际可见 canvas，不能把透明容器误判为主题未生效。
+- Publish 与 Governance 的 Light Creator OS 在所在 Shell 局部使用 canvas `#f0f1ee`、surface `#fafbf8`、field `#e6e8e4` 与中性边框。Notifications 的 Light WATCH 使用 canvas `#eeede9`、surface `#faf9f6`、secondary surface `#e4e2dc`。Auth 使用既有浅色 canvas `#f7f8fa` 与语义 surface，不改变全局 tokens。
+- 视觉 dark-first 仍是品牌基线；产品行为保持无合法保存偏好时 light，保存 dark/light 仍恢复，切换和刷新逻辑不改。
+- Publish 通过编号、字级、留白和细线建立六个章节，桌面使用窄标签列与宽表单列，<=700px 顺序单列。可见范围 <=850px 单列，提交操作在移动端全宽。选择文件界面明确表达点击选择，不暗示拖放、草稿、定时或多步保存。
+- Auth 的桌面视觉重点为品牌句与现有 mark/frame geometry，表单通过细竖线与叙事分开，避免大 Card。<=700px 隐藏次要品牌条目和几何图形，缩短叙事，使 390px 登录/注册 CTA 位于首屏。
+- Notifications 用类别、时间、标题/预览、已读操作构成行，已读降低字重；未读文字与圆点保留，处理失败有文字与图标，不只靠颜色。移动端时间独立一行，操作保持 44px。空状态不新增动作。
+- Governance 的桌面操作窄列纵向排列，<=700px 记录单列并隐藏列标题；移动操作三列，<=360px 为两列加完整驳回行。筛选栏允许自身横向滚动，页面不得横向溢出。长标题、ASCII/下划线、详情、文件名使用安全换行。
+- Rose 用于主 CTA、当前模式/关键提示；Cyan 用于真实上传进度和选择反馈。不使用大面积渐变、虚构摄影图或伪造视频帧。通知忙碌图标和发布进度遵守 reduced-motion；焦点延续共享体系与页面局部可见样式。
+
+仅四个页面的视觉范围扩展；已验收的 App/Shell、WATCH、Playback、Creator Channel 与 Studio workspace 保持原范围。截图为隔离验收夹具，不作为生产图片资产；实际结果与视觉确认见 [Phase 5 验收报告](../../docs/gvideo3-phase5-acceptance.md)。
