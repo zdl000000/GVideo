@@ -4,6 +4,18 @@
 
 ## 当前范围
 
+Phase 3 + Phase 3.1 已由用户通过最终工程与视觉验收，WATCH Playback & Creator Channel 作为稳定检查点封版，不再继续视觉调整。用户已授权创建独立 commit、推送当前 Phase 3 分支、创建 PR，并在 Frontend / Backend / Backend Race 均通过后 squash 合并到 main，再同步本地 main。发布状态以 Git 和 GitHub 为准；没有 Phase 4 内容，发布完成后停止。以下“等待验收／未 commit/push”保留各轮验收当时状态。
+
+Phase 3 工程及整体视觉方向已由用户通过。commit 前完成指定的 Phase 3.1 三项增量：light playback 逐区域颜色／token 断言（确认原 warm light 已正确生效，默认行为代码未改）；Related compact 缺图保留 26px GVideo mark 和轻框、隐藏占位文案；频道背景改为 identity 右侧透明几何，取消横幅表面及独立高度。仅修改 scoped CSS、对应 E2E 与设计／验收文档，VideoPlayer、VideoCover 状态逻辑、API／后端零修改。
+
+Phase 3.1 按序 typecheck、18 文件 131 项单测（17.39s）、build 均通过；CSS 101.81 kB / gzip 18.91 kB，HLS budget 通过。随后相关 E2E 26 passed、0 failed、0 skipped（3.0m），含新增 6 项 light/dark／broken cover／channel 视觉检查和原播放、频道、主题回归。五张截图在忽略的 tmp，缺图状态使用隔离夹具；其余为真实视频／作者数据。完整记录见验收报告顶部 Phase 3.1。没有再运行综合脚本，没有 commit／push，不进入 Phase 4。
+
+Phase 2 / 2.1 已通过 PR #39 squash 合并到 main，基础为 `81076db`。当前在 `codex/gvideo3-watch-playback-channel` 开发 Phase 3，仅处理 `/video/:id`、`/users/:id` 与对应表现层。VideoPlayer.tsx、hlsLoader.ts、API client、types、App、Shell、后端和 Phase 2 Discovery 均未修改，没有新增依赖。新增 scoped `watch-playback.css`；播放器始终作为主列首个子组件，Theater 和 resize 只改变 CSS 布局。
+
+Phase 3 工程与截图验收完成，等待用户视觉验收；19 项报告见 `docs/gvideo3-phase3-acceptance.md`。关机后恢复原开发服务与 Docker 持久卷，没有清理数据。首次单测遇到 worker 启动超时；后续发现共享 worker 的播放器模块缓存使 HLS mock 未生效，已在 VideoPlayer 测试边界依照项目既有方式清理模块，不改变原测试断言。按序 typecheck、全量 unit（18 文件 / 131 项，13.80s）、build 均通过；播放器 26 项（原 21 项 + 新 5 项）全部保留并通过。CSS 101.44 kB / gzip 18.84 kB，HLS budget raw 360.41 kB / gzip 113.16 kB 通过。最终相关 E2E 41 passed、1 既有条件 skip、0 failed（4.8m），其中新增播放／频道 16 项全部通过，两个 Chromium 项目都实际进入／退出 fullscreen 和 PiP。最终 scripts/check.ps1 退出码 0，含 Go test/vet、18 文件 131 项单测（35.15s）、typecheck、build 和 diff 检查；HTTPS Compose 因未提供 TLS 文件按规则跳过。
+
+真实播放页／频道及 Dialog 完成八个指定视口检查；极长中英文标题、用户名、bio、零统计、空作品与 related 404 使用隔离夹具补验。13 张截图（10 张关键页面 + 3 张长文本边界）和临时预览位于忽略目录，不进入生产构建或提交。没有写入真实关注／收藏／评论／举报数据；已还原匿名／浅色／默认视口并保留真实播放页预览。无新增依赖、暂存区为空、HEAD 仍为 81076db；不 commit、不 push、不进入 Phase 4。
+
 Phase 1 已通过 PR #33 squash 合并到 GitHub main，基础提交为 `7ac6b94`。Phase 2 和 Phase 2.1 均已由用户通过工程与视觉最终验收，作为 WATCH Discovery 稳定检查点封版，不再继续本阶段视觉调整。发布分支为 `codex/gvideo3-watch-discovery`，提交及 PR 合并状态以 Git 和 GitHub 记录为准。未使用 qiaomu-design 技能。`GVideo_3_UI_Kit/` 是用户提供的参考资料，未修改；PNG 中的示意内容未写入产品数据。
 
 用户已授权为 Phase 2 / 2.1 创建独立提交、推送开发分支，通过 PR 检查后合并 main 并同步本地。提交仅保留本阶段源码、测试、设计规范与验收文档；`tmp/`、验收截图、临时长标题预览均被忽略，不进入提交。未包含 Phase 3 内容，完成 Git 发布后停止。以下各阶段验收记录中的“未 commit/push”描述保留验收当时状态。
