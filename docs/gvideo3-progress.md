@@ -4,6 +4,17 @@
 
 ## 当前范围
 
+
+Phase 4 — STUDIO CREATOR OS 已由用户通过最终工程与视觉验收，Studio Dashboard、Content Management 与 Dialog workflow 作为稳定检查点封版，不再继续视觉调整。基线是 PR #40 squash 后 main `4aeadaf`，工作分支 `codex/gvideo3-studio-creator-os`。范围仅 /creator、/me/videos、三个行操作弹窗、SubtitleManager workspace 表现层、新内容行/菜单/空态、scoped studio-workspace.css 与测试文档；无 Phase 5 内容。
+
+用户已授权创建 Phase 4 独立提交、推送当前分支并创建 PR；须等待 Frontend、Backend、Backend Race 全部通过后 squash 合并到 main，再同步本地 main。发布状态以 Git 和 GitHub 为准，完成后停止，不进入 Phase 5。提交仅保留源码、测试、设计规范与验收报告；临时预览、隔离截图夹具、截图、日志及其他忽略产物不进入提交。
+
+Dashboard 只展示真实 CreatorStats 分层累计数字，visibility 与 processing 独立。内容行保留原分页、2500ms polling、AbortController、请求取消；菜单 Dialog 回持久 trigger，保存焦点移到 cleanup 后。重试成功显示 pending/queued/0%，与既有后端重置一致；字幕 busy 状态通知父 Dialog，防止请求中关闭。所有受保护路径和依赖未修改。
+
+当前独立 typecheck、19 文件/154 项 unit、build/HLS budget 均通过；Studio E2E desktop/mobile 共 20 项全部通过（3.0m），含八视口×两主题。14 张明确标记的隔离夹具截图位于忽略目录。最终 Phase 1–3 E2E 回归 50 passed、2 条既有设备条件 skip、0 failed（3.7m），与 Studio 合计 70 passed；scripts/check.ps1 退出码 0，包括 Go test/vet、154 项 unit、typecheck、build/budget 和 diff 检查。HTTPS Compose 因未设置 TLS 文件按脚本规则跳过。完整 22 项记录及已知边界见 docs/gvideo3-phase4-acceptance.md。
+
+以下为此前阶段的历史记录，保留当时“未 commit/push/等待验收”等状态；Phase 3 的发布基线现已由 PR #40 确认。
+
 Phase 3 + Phase 3.1 已由用户通过最终工程与视觉验收，WATCH Playback & Creator Channel 作为稳定检查点封版，不再继续视觉调整。用户已授权创建独立 commit、推送当前 Phase 3 分支、创建 PR，并在 Frontend / Backend / Backend Race 均通过后 squash 合并到 main，再同步本地 main。发布状态以 Git 和 GitHub 为准；没有 Phase 4 内容，发布完成后停止。以下“等待验收／未 commit/push”保留各轮验收当时状态。
 
 Phase 3 工程及整体视觉方向已由用户通过。commit 前完成指定的 Phase 3.1 三项增量：light playback 逐区域颜色／token 断言（确认原 warm light 已正确生效，默认行为代码未改）；Related compact 缺图保留 26px GVideo mark 和轻框、隐藏占位文案；频道背景改为 identity 右侧透明几何，取消横幅表面及独立高度。仅修改 scoped CSS、对应 E2E 与设计／验收文档，VideoPlayer、VideoCover 状态逻辑、API／后端零修改。

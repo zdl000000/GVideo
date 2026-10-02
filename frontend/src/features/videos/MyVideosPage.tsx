@@ -1,32 +1,21 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import {
-  CircleCheck,
-  Eye,
-  Film,
-  Heart,
-  History,
-  ImagePlus,
-  MessageCircle,
-  Pencil,
-  Play,
-  RefreshCw,
-  Trash2,
-  Upload,
-  X
-} from "lucide-react";
+import { CircleCheck, ImagePlus, Trash2, Upload, X } from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../../shared/api/client";
-import { EmptyState } from "../../shared/components/Feedback";
+import { StudioEmptyState } from "../../shared/components/StudioEmptyState";
+import { VideoCover } from "../../shared/components/VideoCover";
+import { ContentRow } from "./ContentRow";
 import { Pagination } from "../../shared/components/Pagination";
-import { ProcessingBadge, ProcessingProgress } from "../../shared/components/Processing";
 import { useDialogFocus } from "../../shared/hooks/useDialogFocus";
 import { errorMessage } from "../../shared/lib/errors";
-import { formatCount, formatDate, formatDuration, formatFileSize, pageFrom } from "../../shared/lib/format";
+import { pageFrom } from "../../shared/lib/format";
 import { visibilityHelp, visibilityLabels } from "../../shared/lib/visibility";
 import { SubtitleManager } from "../captions/SubtitleManager";
 import type { SubtitleTrack, Video, VideoPage as VideoPageData } from "../../types";
 
-export function ManagementLoading() { return <div className="management-list">{Array.from({ length: 5 }, (_, index) => <div className="management-skeleton" key={index}><span /><div><i /><i /><i /></div></div>)}</div>; }
+export function ManagementLoading() {
+  return <div className="gv-content-list" role="status" aria-label="正在加载投稿">{Array.from({ length: 5 }, (_, index) => <div className="gv-content-row gv-content-skeleton" key={index} aria-hidden="true"><div className="gv-content-identity"><span className="gv-skeleton gv-content-cover" /><div className="gv-content-copy"><span className="gv-skeleton" /><span className="gv-skeleton" /></div></div><span className="gv-skeleton" /><span className="gv-skeleton" /><span className="gv-skeleton" /><span className="gv-skeleton" /><span /></div>)}</div>;
+}
 
 export function EditVideoDialog({ video, categories, onClose, onSaved }: { video: Video; categories: string[]; onClose: () => void; onSaved: (video: Video) => void }) {
   const coverRef = useRef<HTMLInputElement>(null);
@@ -52,11 +41,11 @@ export function EditVideoDialog({ video, categories, onClose, onSaved }: { video
   };
   return (
     <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onClose(); }}>
-      <section ref={panelRef} className="dialog-panel edit-video-dialog" role="dialog" aria-modal="true" aria-labelledby="edit-video-title">
-        <header><div><p className="eyebrow">投稿管理</p><h2 id="edit-video-title">编辑视频信息</h2></div><button type="button" className="icon-button" onClick={onClose} disabled={busy} aria-label="关闭编辑窗口" title="关闭"><X size={19} /></button></header>
+      <section ref={panelRef} className="dialog-panel edit-video-dialog gv-studio-dialog" role="dialog" aria-modal="true" aria-labelledby="edit-video-title">
+        <header><div><p className="eyebrow">CONTENT / EDIT</p><h2 id="edit-video-title">编辑视频信息</h2><p className="dialog-context" title={video.title}>{video.title}</p></div><button type="button" className="icon-button" onClick={onClose} disabled={busy} aria-label="关闭编辑窗口" title="关闭"><X size={19} /></button></header>
         <form className="edit-video-form" onSubmit={submit}>
-          <button type="button" className="edit-cover" onClick={() => coverRef.current?.click()}>
-            {coverPreview ? <img src={coverPreview} alt="当前封面" /> : <div className="cover-fallback"><Film size={28} /></div>}
+          <button type="button" className="edit-cover" aria-label="替换封面" disabled={busy} onClick={() => coverRef.current?.click()}>
+            <div className="gv-edit-media"><VideoCover src={coverPreview} eager /></div>
             <span><ImagePlus size={16} />{cover ? "已选择新封面" : "替换封面"}</span>
           </button>
           <input ref={coverRef} className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setCover(event.target.files?.[0] || null)} />
@@ -76,19 +65,20 @@ export function EditVideoDialog({ video, categories, onClose, onSaved }: { video
 
 export function SubtitleDialog({ video, onClose, onTracksChanged }: { video: Video; onClose: () => void; onTracksChanged: (tracks: SubtitleTrack[]) => void }) {
   const panelRef = useRef<HTMLElement>(null);
-  useDialogFocus(panelRef, false, onClose);
+  const [busy, setBusy] = useState(false);
+  useDialogFocus(panelRef, busy, onClose);
   return (
-    <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <section ref={panelRef} className="dialog-panel subtitle-dialog" role="dialog" aria-modal="true" aria-labelledby={`subtitle-dialog-title-${video.id}`}>
+    <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onClose(); }}>
+      <section ref={panelRef} className="dialog-panel subtitle-dialog gv-studio-dialog" role="dialog" aria-modal="true" aria-labelledby={`subtitle-dialog-title-${video.id}`}>
         <header>
           <div>
-            <p className="eyebrow">投稿管理</p>
+            <p className="eyebrow">CONTENT / SUBTITLES</p>
             <h2 id={`subtitle-dialog-title-${video.id}`}>字幕管理</h2>
             <p className="dialog-context" title={video.title}>{video.title}</p>
           </div>
-          <button type="button" className="icon-button" onClick={onClose} aria-label="关闭字幕管理" title="关闭"><X size={19} /></button>
+          <button type="button" className="icon-button" onClick={onClose} disabled={busy} aria-label="关闭字幕管理" title="关闭"><X size={19} /></button>
         </header>
-        <SubtitleManager video={video} onTracksChanged={onTracksChanged} />
+        <SubtitleManager video={video} onTracksChanged={onTracksChanged} workspace onBusyChange={setBusy} />
       </section>
     </div>
   );
@@ -99,8 +89,8 @@ export function DeleteVideoDialog({ video, busy, onClose, onConfirm }: { video: 
   useDialogFocus(panelRef, busy, onClose);
   return (
     <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onClose(); }}>
-      <section ref={panelRef} className="dialog-panel delete-video-dialog" role="alertdialog" aria-modal="true" aria-labelledby="delete-video-title" aria-describedby="delete-video-description">
-        <span className="danger-icon"><Trash2 size={22} /></span>
+      <section ref={panelRef} className="dialog-panel delete-video-dialog gv-studio-dialog" role="alertdialog" aria-modal="true" aria-labelledby="delete-video-title" aria-describedby="delete-video-description">
+        <p className="eyebrow">CONTENT / DELETE</p><span className="danger-icon"><Trash2 size={22} /></span>
         <h2 id="delete-video-title">删除这条投稿？</h2>
         <p id="delete-video-description">“{video.title}”的数据库记录、原视频、封面、字幕和转码文件都会被永久删除，此操作无法撤销。</p>
         <div className="dialog-actions"><button type="button" className="secondary-button" onClick={onClose} disabled={busy}>取消</button><button type="button" className="danger-button" onClick={onConfirm} disabled={busy}>{busy ? "正在删除..." : "确认删除"}</button></div>
@@ -142,8 +132,15 @@ export function MyVideosPage() {
   };
   const closeDialog = (setter: (value: null) => void) => {
     setter(null);
-    window.setTimeout(() => dialogTriggerRef.current?.focus(), 0);
+
   };
+
+  // Restore focus after the dialog's effect cleanup has restored background inert state.
+  useEffect(() => {
+    if (editing || subtitleEditing || deleting || !dialogTriggerRef.current) return;
+    dialogTriggerRef.current.focus();
+    dialogTriggerRef.current = null;
+  }, [editing, subtitleEditing, deleting]);
 
   useEffect(() => { api.categories().then(setCategories).catch(console.error); }, []);
   useEffect(() => {
@@ -197,7 +194,7 @@ export function MyVideosPage() {
     setBusy(`retry-${video.id}`); setError("");
     try {
       await api.retryVideo(video.id);
-      setResult((current) => ({ ...current, items: current.items.map((item) => item.id === video.id ? { ...item, processing_status: "pending", processing_error: undefined } : item) }));
+      setResult((current) => ({ ...current, items: current.items.map((item) => item.id === video.id ? { ...item, processing_status: "pending", processing_stage: "queued", processing_progress: 0, processing_error: undefined } : item) }));
       showNotice("已重新加入转码队列");
     } catch (err) { setError(errorMessage(err)); } finally { setBusy(""); }
   };
@@ -222,41 +219,25 @@ export function MyVideosPage() {
   };
 
   return (
-    <div className="page management-page">
-      <section className="page-heading heading-row"><div><p className="eyebrow">个人空间</p><h1 ref={pageHeadingRef} tabIndex={-1}>我的投稿</h1><p>查看作品表现，继续完善你的创作列表。</p></div><Link to="/upload" className="primary-button"><Upload size={17} />发布视频</Link></section>
-      <div className="management-summary"><span><strong>{result.total}</strong> 条投稿</span><span>每页 12 条</span></div>
+    <div className="page gv-content-page">
+      <section className="page-heading heading-row gv-studio-heading"><div><p className="eyebrow">STUDIO / CONTENT</p><h1 ref={pageHeadingRef} tabIndex={-1}>我的投稿</h1><p>管理作品信息、可见范围和媒体处理状态。</p></div><Link to="/upload" className="primary-button"><Upload size={17} />发布视频</Link></section>
+      <div className="gv-content-summary"><span><strong>{result.total}</strong> 条投稿</span><span>每页 12 条</span></div>
       {notice && <div className="management-notice" role="status"><CircleCheck size={17} />{notice}</div>}
       {error && <p className="inline-error management-error">{error}</p>}
       {loading ? <ManagementLoading /> : videos.length ? (
         <>
-          <section className="management-list" aria-label="投稿列表">
-            {videos.map((video) => (
-              <article className="management-row" key={video.id}>
-                <Link to={`/video/${video.id}`} className="management-cover">
-                  {video.cover_url ? <img src={video.cover_url} alt="" loading="lazy" /> : <div className="cover-fallback"><Play size={24} fill="currentColor" /></div>}
-                  <span className="duration">{formatDuration(video.duration_seconds)}</span>
-                </Link>
-                <div className="management-copy">
-                  <div className="management-title-line"><Link to={`/video/${video.id}`}>{video.title}</Link><ProcessingBadge video={video} /></div>
-                  <p>{video.description || "暂未填写视频简介"}</p>
-                  <div className="management-meta"><span>{video.category}</span><span className={`visibility-badge ${video.visibility}`}>{visibilityLabels[video.visibility]}</span><span>{formatDate(video.created_at)}</span><span>{formatFileSize(video.size_bytes)}</span></div>
-                  {(video.processing_status === "pending" || video.processing_status === "processing") && <ProcessingProgress video={video} compact />}
-                  {video.processing_status === "failed" && <span className="management-processing-error">{video.processing_error || "媒体处理失败，可以手动重新转码"}</span>}
-                  <div className="management-stats"><span><Eye size={14} />{formatCount(video.views_count)} 播放</span><span><Heart size={14} />{formatCount(video.likes_count)}</span><span><MessageCircle size={14} />{formatCount(video.comments_count)}</span></div>
-                </div>
-                <div className="management-actions" aria-label={`${video.title}的管理操作`}>
-                  <button type="button" onClick={(event) => { dialogTriggerRef.current = event.currentTarget; setEditing(video); }} title="编辑投稿"><Pencil size={16} />编辑</button>
-                  <button type="button" onClick={(event) => { dialogTriggerRef.current = event.currentTarget; setSubtitleEditing(video); }} title="管理字幕"><MessageCircle size={16} />字幕</button>
-                  {video.processing_status === "failed" && <button type="button" disabled={busy === `retry-${video.id}`} onClick={() => retry(video)} title="重新转码"><RefreshCw size={16} className={busy === `retry-${video.id}` ? "spin-icon" : ""} />重试</button>}
-                  <button type="button" className="danger" disabled={video.processing_status === "processing" || busy === `delete-${video.id}`} onClick={(event) => { dialogTriggerRef.current = event.currentTarget; setDeleting(video); }} title={video.processing_status === "processing" ? "转码完成后才能删除" : "删除投稿"}><Trash2 size={16} />删除</button>
-                </div>
-              </article>
-            ))}
+          <section className="gv-content-list" aria-label="投稿列表">
+            <div className="gv-content-columns" aria-hidden="true"><span>内容</span><span>处理状态</span><span>可见范围</span><span>表现</span><span>发布日期</span><span /></div>
+            {videos.map((video) => <ContentRow key={video.id} video={video} busy={busy}
+              onEdit={(trigger) => { dialogTriggerRef.current = trigger; setEditing(video); }}
+              onSubtitles={(trigger) => { dialogTriggerRef.current = trigger; setSubtitleEditing(video); }}
+              onDelete={(trigger) => { dialogTriggerRef.current = trigger; setDeleting(video); }}
+              onRetry={() => retry(video)} />)}
           </section>
           <Pagination page={result.page} pageSize={result.page_size} total={result.total} hasNext={result.has_next} onPageChange={setPage} />
         </>
-      ) : <EmptyState icon={<History size={28} />} title="还没有投稿" text="第一条作品不必完美，先让它可以被看见。" action={<Link to="/upload" className="primary-button"><Upload size={17} />开始投稿</Link>} />}
-      {editing && <EditVideoDialog video={editing} categories={categories} onClose={() => closeDialog(setEditing)} onSaved={(updated) => { applyUpdated(updated); window.setTimeout(() => dialogTriggerRef.current?.focus(), 0); }} />}
+      ) : <StudioEmptyState />}
+      {editing && <EditVideoDialog video={editing} categories={categories} onClose={() => closeDialog(setEditing)} onSaved={applyUpdated} />}
       {subtitleEditing && <SubtitleDialog video={subtitleEditing} onClose={() => closeDialog(setSubtitleEditing)} onTracksChanged={(tracks) => {
         setSubtitleEditing((current) => current ? { ...current, subtitle_tracks: tracks } : current);
         setResult((current) => ({ ...current, items: current.items.map((item) => item.id === subtitleEditing.id ? { ...item, subtitle_tracks: tracks } : item) }));

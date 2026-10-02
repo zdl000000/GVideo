@@ -1,15 +1,17 @@
-import { FormEvent, useRef, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { Check, CircleCheck, Trash2, Upload } from "lucide-react";
 import { api } from "../../shared/api/client";
 import { errorMessage } from "../../shared/lib/errors";
 import type { SubtitleTrack, Video } from "../../types";
 
 interface SubtitleManagerProps {
+  workspace?: boolean;
+  onBusyChange?: (busy: boolean) => void;
   video: Video;
   onTracksChanged: (tracks: SubtitleTrack[]) => void;
 }
 
-export function SubtitleManager({ video, onTracksChanged }: SubtitleManagerProps) {
+export function SubtitleManager({ video, onTracksChanged, workspace = false, onBusyChange }: SubtitleManagerProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const [language, setLanguage] = useState("zh-CN");
@@ -18,6 +20,7 @@ export function SubtitleManager({ video, onTracksChanged }: SubtitleManagerProps
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const tracks = video.subtitle_tracks ?? [];
+  useEffect(() => { onBusyChange?.(Boolean(busy)); }, [busy, onBusyChange]);
 
   const showNotice = (message: string) => {
     setNotice(message);
@@ -74,9 +77,9 @@ export function SubtitleManager({ video, onTracksChanged }: SubtitleManagerProps
   };
 
   return (
-    <section className="subtitle-manager" aria-labelledby={`subtitle-manager-${video.id}`} aria-busy={Boolean(busy)}>
+    <section className={`subtitle-manager${workspace ? " gv-subtitle-workspace" : ""}`} aria-labelledby={`subtitle-manager-${video.id}`} aria-busy={Boolean(busy)}>
       <header>
-        <div><strong id={`subtitle-manager-${video.id}`}>字幕管理</strong><span>管理语言轨道与默认字幕，支持 VTT 或 SRT，最大 2 MB</span></div>
+        <div><strong id={`subtitle-manager-${video.id}`}>{workspace ? "字幕轨道" : "字幕管理"}</strong><span>管理语言轨道与默认字幕，支持 VTT 或 SRT，最大 2 MB</span></div>
         <span>{tracks.length} 条轨道</span>
       </header>
       {tracks.length ? (
