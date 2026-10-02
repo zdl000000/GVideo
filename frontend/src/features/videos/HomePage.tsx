@@ -1,119 +1,60 @@
 import { useEffect, useState } from "react";
-import { Clock3, Eye, Film, MessageCircle, Play, Sparkles, Upload } from "lucide-react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Film, Upload } from "lucide-react";
+import { Link } from "react-router-dom";
 import { api } from "../../shared/api/client";
 import { errorMessage } from "../../shared/lib/errors";
-import { formatCount, formatDuration, pageFrom } from "../../shared/lib/format";
 import { EmptyState, ErrorBlock, LoadingGrid } from "../../shared/components/Feedback";
 import { Pagination } from "../../shared/components/Pagination";
 import { VideoCard } from "../../shared/components/VideoCard";
-import type { VideoPage as VideoPageData } from "../../types";
+import { VideoHero } from "../../shared/components/VideoHero";
+import { CategoryFilter, SectionHeader, SortSwitch } from "../../shared/components/DiscoveryControls";
+import { useDiscoveryFeed } from "./useDiscoveryFeed";
+import type { Video } from "../../types";
 
 export function HomePage() {
-  const [searchParams, setSearchParams] = useSearchParams();
-  const [result, setResult] = useState<VideoPageData>({ items: [], page: 1, page_size: 36, total: 0, has_next: false });
-  const [categories, setCategories] = useState<string[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const query = searchParams.get("q") || "";
-  const category = searchParams.get("category") || "";
-  const page = pageFrom(searchParams);
-  const videos = result.items;
+  const feed = useDiscoveryFeed("latest");
+  const { result, query, category, page, loading, error } = feed;
+  const filtered = Boolean(query || category);
+  const discovery = !filtered && page === 1;
+  const [popular, setPopular] = useState<Video[]>([]);
+  const [popularLoading, setPopularLoading] = useState(false);
+  const [popularError, setPopularError] = useState("");
+  const [popularRevision, setPopularRevision] = useState(0);
 
   useEffect(() => {
-    api.categories().then(setCategories).catch(console.error);
-  }, []);
-
-  useEffect(() => {
-    setLoading(true);
-    setError("");
+    if (!discovery) return;
     const controller = new AbortController();
-    const params = new URLSearchParams({ sort: "latest", page: String(page), page_size: "36" });
-    if (query) params.set("q", query);
-    if (category) params.set("category", category);
-    api.videos(params, controller.signal).then(setResult).catch((err) => { if (!controller.signal.aborted) setError(errorMessage(err)); }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    setPopular([]);
+    setPopularLoading(true);
+    setPopularError("");
+    api.videos(new URLSearchParams({ sort: "popular", page: "1", page_size: "12" }), controller.signal)
+      .then((data) => { if (!controller.signal.aborted) setPopular(data.items); })
+      .catch((err) => { if (!controller.signal.aborted) setPopularError(errorMessage(err)); })
+      .finally(() => { if (!controller.signal.aborted) setPopularLoading(false); });
     return () => controller.abort();
-  }, [query, category, page]);
+  }, [discovery, popularRevision]);
 
-  const featured = page === 1 ? videos.slice(0, 5) : [];
-  const leadVideo = featured[0];
-  const secondaryVideos = featured.slice(1);
-  const setFilter = (key: string, value: string) => {
-    const next = new URLSearchParams(searchParams);
-    value ? next.set(key, value) : next.delete(key);
-    next.delete("page");
-    setSearchParams(next);
-  };
-  const setPage = (value: number) => {
-    const next = new URLSearchParams(searchParams);
-    value > 1 ? next.set("page", String(value)) : next.delete("page");
-    setSearchParams(next);
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  };
-  const popularParams = new URLSearchParams(searchParams);
-  popularParams.delete("sort");
-  popularParams.delete("page");
-  const popularTarget = `/popular${popularParams.size ? `?${popularParams}` : ""}`;
-  const latestTarget = `/latest${popularParams.size ? `?${popularParams}` : ""}`;
+  const videos = result.items.filter((video, index, items) => items.findIndex((item) => item.id === video.id) === index);
+  const featured = discovery ? videos.filter((video) => video.processing_status === "ready").slice(0, 4) : [];
+  const featuredIDs = new Set(featured.map((video) => video.id));
+  const latest = videos.filter((video) => !featuredIDs.has(video.id));
+  const visibleIDs = new Set(videos.map((video) => video.id));
+  const popularPreview = popular.map((video, index) => ({ video, rank: index + 1 })).filter(({ video }, index, items) => !visibleIDs.has(video.id) && items.findIndex((item) => item.video.id === video.id) === index).slice(0, 3);
 
   return (
-    <div className="page home-page">
-      {query || category ? (
-        <section className="discovery-head compact-heading">
-          <div><p className="eyebrow">内容检索</p><h1>{query ? `“${query}”的搜索结果` : category}</h1></div>
-          <div className="head-stat"><strong>{result.total}</strong><span>条内容</span></div>
-        </section>
-      ) : leadVideo ? (
-        <section className={`featured-showcase ${secondaryVideos.length ? "" : "single"} ${secondaryVideos.length === 1 ? "sparse" : ""}`} aria-label="最新发布视频">
-          <article className="featured-lead">
-            <Link to={`/video/${leadVideo.id}`} className="featured-click-target" aria-label={`播放 ${leadVideo.title}`} />
-            {leadVideo.cover_url ? <img src={leadVideo.cover_url} alt="" /> : <div className="cover-fallback"><Play size={42} fill="currentColor" /></div>}
-            <span className="featured-shade" />
-            <span className="featured-badge">最新发布</span>
-            <span className="featured-lead-copy">
-              <Link to={`/video/${leadVideo.id}`} className="featured-lead-title">{leadVideo.title}</Link>
-              <span><Link to={`/users/${leadVideo.user_id}`} className="featured-author-link">{leadVideo.username}</Link><span><Eye size={14} />{formatCount(leadVideo.views_count)}</span><span><MessageCircle size={14} />{formatCount(leadVideo.comments_count)}</span></span>
-            </span>
-            <span className="duration">{formatDuration(leadVideo.duration_seconds)}</span>
-          </article>
-          {secondaryVideos.length > 0 && (
-            <div className="featured-secondary">
-              {secondaryVideos.map((video) => (
-                <article className="featured-mini" key={video.id}>
-                  <Link to={`/video/${video.id}`} className="featured-mini-cover">
-                    {video.cover_url ? <img src={video.cover_url} alt="" loading="lazy" /> : <div className="cover-fallback"><Play size={24} fill="currentColor" /></div>}
-                    <span className="featured-mini-stats"><span><Eye size={13} />{formatCount(video.views_count)}</span><span><MessageCircle size={13} />{formatCount(video.comments_count)}</span></span>
-                    <span className="duration">{formatDuration(video.duration_seconds)}</span>
-                  </Link>
-                  <Link to={`/video/${video.id}`} className="featured-mini-title">{video.title}</Link>
-                  <span className="featured-mini-author"><Link to={`/users/${video.user_id}`}>{video.username}</Link> · {video.category}</span>
-                </article>
-              ))}
-            </div>
-          )}
-        </section>
-      ) : null}
-
-      <section className="content-heading">
-        <div><h2>{query || category ? "筛选结果" : "最新视频"}</h2><span>共 {result.total} 条视频</span></div>
-      </section>
-
-      <section className="filter-row" aria-label="视频筛选">
-        <div className="category-scroller">
-          <button className={!category ? "active" : ""} onClick={() => setFilter("category", "")}>全部</button>
-          {categories.map((item) => <button className={category === item ? "active" : ""} key={item} onClick={() => setFilter("category", item)}>{item}</button>)}
-        </div>
-        <div className="segmented-control">
-          <Link to={latestTarget}><Clock3 size={15} />最新</Link>
-          <Link to={popularTarget}><Sparkles size={15} />热门</Link>
-        </div>
-      </section>
-
-      {loading ? <LoadingGrid /> : error ? <ErrorBlock message={error} /> : videos.length ? (
-        <><section className="video-grid">{videos.map((video) => <VideoCard video={video} key={video.id} />)}</section><Pagination page={result.page} pageSize={result.page_size} total={result.total} hasNext={result.has_next} onPageChange={setPage} /></>
-      ) : (
-        <EmptyState icon={<Film size={28} />} title="这里还没有视频" text={query || category ? "换个关键词或分类继续找找。" : "成为第一个发布作品的人。"} action={<Link to="/upload" className="primary-button"><Upload size={17} />发布视频</Link>} />
-      )}
+    <div className={`page gv-discovery-page home-page ${filtered ? "gv-results-mode" : ""}`}>
+      <header className="gv-discovery-header">
+        <div><p className="eyebrow">{query ? "SEARCH / 搜索" : category ? "CATEGORY / 分类" : "WATCH / 发现"}</p><h1>{query ? `“${query}”的搜索结果` : category || "发现好视频"}</h1></div>
+        <span className="gv-content-count" role="status">{loading ? "正在加载内容" : error ? "内容暂时无法加载" : `共 ${result.total} 条视频`}</span>
+      </header>
+      <section className="filter-row" aria-label="视频筛选"><CategoryFilter categories={feed.categories} value={category} onChange={feed.setCategory} /><SortSwitch params={feed.params} active="latest" /></section>
+      {feed.categoryError && <p className="gv-filter-notice" role="status">{feed.categoryError}<button onClick={feed.retry}>重试</button></p>}
+      {loading ? <LoadingGrid /> : error ? <ErrorBlock message={error} /> : videos.length ? <>
+        {featured.length > 0 && <section className={`gv-home-stories ${featured.length === 1 ? "gv-home-stories--single" : ""}`} aria-label="最新发布视频"><VideoHero video={featured[0]} />{featured.length > 1 && <div className="gv-secondary-stories"><p className="gv-stories-label">继续发现 <span> / LATEST</span></p>{featured.slice(1).map((video) => <VideoCard key={video.id} video={video} variant="compact" />)}</div>}</section>}
+        {latest.length > 0 && <section aria-label={filtered ? "筛选结果" : "最新视频"}><SectionHeader title={filtered ? "筛选结果" : "最新视频"} detail={filtered ? undefined : "按发布时间排序"} to={filtered ? undefined : "/latest"} /><div className={discovery ? "gv-latest-mosaic" : "video-grid"}>{latest.map((video, index) => <VideoCard key={video.id} video={video} variant={discovery && index === 0 && latest.length > 1 ? "editorial" : "standard"} />)}</div></section>}
+        <Pagination page={result.page} pageSize={result.page_size} total={result.total} hasNext={result.has_next} onPageChange={feed.setPage} />
+        {discovery && (popularLoading || popularError || popularPreview.length > 0) && <section className="gv-popular-preview" aria-label="热门预览"><SectionHeader title="热门发现" detail="播放与点赞综合排序" to="/popular" />{popularLoading ? <p role="status" className="gv-preview-status">正在加载热门内容…</p> : popularError ? <div className="gv-preview-status" role="status"><p>热门内容暂时无法加载：{popularError}</p><button type="button" className="secondary-button" onClick={() => setPopularRevision((value) => value + 1)}>重试热门内容</button></div> : <div className="gv-ranked-list">{popularPreview.map(({ video, rank }) => <VideoCard key={video.id} video={video} variant="ranked" rank={rank} />)}</div>}</section>}
+      </> : <EmptyState icon={<Film size={28} />} title="这里还没有视频" text={filtered ? "换个关键词或分类继续找找。" : "成为第一个发布作品的人。"} action={<Link to="/upload" className="primary-button"><Upload size={17} />发布视频</Link>} />}
     </div>
   );
 }

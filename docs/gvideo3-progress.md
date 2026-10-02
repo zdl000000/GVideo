@@ -4,7 +4,34 @@
 
 ## 当前范围
 
-已恢复此前暂停的开发，按确认过的计划实施 Phase 1。未使用 qiaomu-design 技能。`GVideo_3_UI_Kit/` 是用户提供的参考资料，未修改；PNG 中的示意内容未写入产品数据。
+Phase 1 已通过 PR #33 squash 合并到 GitHub main，基础提交为 `7ac6b94`。Phase 2 和 Phase 2.1 均已由用户通过工程与视觉最终验收，作为 WATCH Discovery 稳定检查点封版，不再继续本阶段视觉调整。发布分支为 `codex/gvideo3-watch-discovery`，提交及 PR 合并状态以 Git 和 GitHub 记录为准。未使用 qiaomu-design 技能。`GVideo_3_UI_Kit/` 是用户提供的参考资料，未修改；PNG 中的示意内容未写入产品数据。
+
+用户已授权为 Phase 2 / 2.1 创建独立提交、推送开发分支，通过 PR 检查后合并 main 并同步本地。提交仅保留本阶段源码、测试、设计规范与验收文档；`tmp/`、验收截图、临时长标题预览均被忽略，不进入提交。未包含 Phase 3 内容，完成 Git 发布后停止。以下各阶段验收记录中的“未 commit/push”描述保留验收当时状态。
+
+## Phase 2.1 Visual Polish
+
+仅调整品牌化抽象封面占位、发现页浅色画布与媒体边框、Hero 极长标题边界、关注与收藏的编辑式空状态。空 URL/404 回退状态逻辑、API、搜索、分页和收藏行为保持 Phase 2 实现。默认浅色及已保存主题不变；未修改 VideoPage、VideoPlayer 或 Studio。桌面标题最多 3 行，单条 Hero 和移动端保持 2 行；窄屏收紧描述与间距，保证元信息和 CTA 留在 Hero 内。
+
+按要求依次执行 typecheck、unit、build，退出码均为 0；18 个单元测试文件、106 项通过。相关 discovery、主题、菜单及新增 polish E2E：25 项通过、1 项按桌面设备条件跳过、0 失败（2.2m）。中英文极长标题覆盖 1440、920、768、430、390、320px；原 discovery 边界用例继续覆盖八个指定视口。七张关键截图和完整范围记录见 `docs/gvideo3-phase21-acceptance.md`。截图与临时标题预览位于忽略目录，不进入构建或提交。到此停止，不进入 Phase 3，不 commit/push。
+
+## Phase 2 当前状态
+
+以下保留 Phase 2 原验收记录（用户已通过）。范围为首页、最新、热门、关注和收藏；没有进入 Phase 3，没有修改后端、播放器、Studio、Auth、App 路由及主题初始化代码，没有新增依赖。完整文件列表与 15 项验收信息见 `docs/gvideo3-phase2-acceptance.md`；后续视觉精修增量见上方 Phase 2.1。
+
+- 首页读取真实 latest 第一页（36 条），按 ID 去重后，前 4 条 ready 视频组成一个 Hero 和最多 3 个 secondary story；Latest 排除这些 ID。Popular preview 使用独立热门请求（12 条），排除所有已展示视频，保留 API 原始排名，最多显示 3 条；数据不足时省略区域。请求取消和失败恢复独立于主列表。
+- `q` 或 `category` 存在时进入普通结果列表，不展示 Hero，也不请求热门预览。全局搜索仍使用 `/?q=`；分类、查询和分页保留原契约。首页第二页是常规列表。
+- VideoCard 使用 standard、editorial、compact、ranked 四个显式变体，共用 Video 类型。其他阶段原有调用不指定 variant 时保留原卡片密度；共享封面失败处理同时改善这些调用。
+- VideoCover 在空 URL、加载中和 404 时展示中性深色表面与已有品牌标记；失败后移除远程 img，不循环切换 src。普通卡片 lazy，Hero eager。
+- 热门第一页 01–03 采用不同媒体尺度，4+ 紧凑排列；排名使用 `(page - 1) * page_size + index + 1`，第二页从 37 开始。没有伪造周月榜、涨跌、推荐原因或数据。
+- 关注突出真实 creator identity 和发布时间，保留 Protected。收藏保留原取消 API、请求防重复和条目失败重试，成功后保留原位置并转移焦点到状态；主动“更新列表”重新请求实际内容，末页为空时回到仍有效的页码。
+- 发现页常规网格桌面三列、平板两列，<=520px 单列；Hero 移动端最多 410px，分类横向滚动，控件可键盘操作。Shell 断点保持 Phase 1。最终 E2E 发现单条长标题 Hero 在 920px 桌面视口因 aspect-ratio 与最小高度产生宽度溢出，已给该 Hero 明确 `width: 100%`，所有边界复验通过。
+- 最终实际浏览器再次检查 8 个指定视口的真实首页，无横向溢出；9 张截图涵盖首页 desktop dark/light、390px 首页、搜索、热门 desktop/mobile、最新、真实账户的关注与收藏空状态，保存在忽略的 `tmp/`。没有为了截图创建内容或修改个人关注/收藏数据。
+
+最终按顺序运行 `npm run typecheck`、`npm test`、`npm run build`，均退出码 0。unit 为 18 文件、106 项全部通过（22.09s）；build 为 1917 modules、7.11s，CSS 84.42 kB / gzip 15.92 kB；HLS 预算通过（raw 360.41 kB、gzip 113.16 kB）。随后相关 E2E 为 19 项通过、1 项按设备条件跳过、0 失败（1.6m）；跳过仅为 desktop 项目的移动菜单测试，mobile 对应用例通过。
+
+此前开发服务中断时，默认 Vitest 两次 worker 启动超时，forks 诊断运行还有一项既有守卫等待超时。用户重启 Docker 后，前后端容器均 healthy，8080/readyz 和 5173 返回 200，默认测试运行通过；没有放宽旧断言或修改测试配置，不能据此认定 Docker 是超时的唯一原因。错误浏览器标签页恢复后完成截图，最终还原匿名/浅色、默认视口并保留首页预览。未清理媒体卷、数据库、容器或用户数据，未修改系统权限和安全设置。Phase 2 到此停止，等待用户确认，不进入 Phase 3，不 commit/push。
+
+## Phase 1 基础设施（已验收）
 
 Phase 1 已建立以下基础：
 
@@ -43,9 +70,9 @@ Phase 1 已建立以下基础：
 
 `tmp/` 中的检查日志和实际页面截图是忽略的临时文件，不属于源码。`tmp/gvideo3-phase1-css.mjs` 是按旧样式文件行号编写的一次性拆分辅助文件，不应再次执行。
 
-## 下一阶段
+## 后续安排
 
-Phase 2：重构 VideoCard 的 editorial、compact、ranked 等实际需要的变体，再迁移首页、最新、热门、关注和收藏。首页 Featured 与 Latest 按真实视频 ID 去重；数据不足减少 section。保留真实分类、搜索、分页、排序、收藏取消及相关状态。
+Phase 2 / 2.1：已通过最终验收并封版，Git 发布范围见本文开头。
 
 Phase 3：播放页和创作者空间。保持 VideoPlayer 的 HLS、fallback、质量、速度、字幕、音量、全屏、剧场、续播与键盘行为，仅修改呈现。
 

@@ -43,3 +43,13 @@
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+
+@media (hover: hover) and (pointer: fine) {
+  .gv-video-hero:hover .gv-cover-image { transform: scale(1.025); }
+  .gv-video-card .cover-link:hover { box-shadow: none; transform: translateY(-2px); }
+  .gv-section-header > a:hover { color: var(--gv-brand-text); }
+}
+.gv-video-card .cover-link:focus-visible .play-overlay { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+@media (prefers-reduced-motion: reduce) {
+  .gv-video-hero .gv-cover-image, .gv-video-card .cover-link, .gv-video-card .gv-cover-image { transform: none !important; }
+}
