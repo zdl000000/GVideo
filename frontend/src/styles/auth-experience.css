@@ -1,0 +1,58 @@
+/* Brand entrance. Every override is scoped to the Phase 5 auth page. */
+.gv-auth-shell:has(.gv-auth-experience) { background: var(--gv-bg); }
+.gv-auth-experience { width: min(1260px, 100%); min-height: calc(100dvh - var(--gv-header-height)); padding: 48px 48px 64px; display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(300px, 390px); align-items: center; gap: clamp(48px, 7vw, 108px); }
+.gv-auth-experience > section { min-width: 0; }
+.gv-auth-experience .gv-auth-eyebrow { margin: 0 0 20px; color: var(--gv-text-3); font: 10px/1.6 var(--gv-font-mono); letter-spacing: .13em; }
+.gv-auth-experience .gv-auth-narrative { position: relative; padding: 30px 0; }
+.gv-auth-experience .gv-auth-narrative h1 { position: relative; z-index: 1; max-width: 640px; font-size: clamp(38px, 4.6vw, 66px); line-height: 1.17; font-weight: 850; letter-spacing: -.045em; }
+.gv-auth-experience .gv-auth-narrative h1 > span { display: block; overflow-wrap: anywhere; }
+.gv-auth-experience .gv-auth-title-stop { color: var(--gv-brand-text); }
+.gv-auth-experience .gv-auth-brand-copy { position: relative; z-index: 1; margin: 22px 0 0; color: var(--gv-text-2); font-size: 15px; line-height: 1.8; }
+.gv-auth-experience .gv-auth-principles { position: relative; z-index: 1; margin-top: 46px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+.gv-auth-experience .gv-auth-principles span { padding-top: 14px; border-top: 1px solid var(--gv-line-strong); display: grid; gap: 7px; color: var(--gv-text-2); font-size: 12px; }
+.gv-auth-experience .gv-auth-principles strong { color: var(--gv-text); font: 700 11px/1.5 var(--gv-font-mono); letter-spacing: .1em; }
+.gv-auth-experience .gv-auth-media-motif { position: relative; width: min(390px, 85%); height: 116px; margin: 36px 0 0; }
+.gv-auth-experience .gv-auth-media-motif > span { position: absolute; inset: 8px 55px 8px 0; border: 1px solid var(--gv-line); border-radius: 3px; transform: skewY(-4deg); }
+.gv-auth-experience .gv-auth-media-motif > span:nth-child(2) { inset: 0 25px 24px 28px; border-color: color-mix(in srgb, var(--gv-cyan-text) 20%, transparent); }
+.gv-auth-experience .gv-auth-media-motif > span:nth-child(3) { inset: 22px 0 0 54px; border-color: color-mix(in srgb, var(--gv-brand-text) 22%, transparent); }
+.gv-auth-experience .gv-auth-media-motif > img { position: absolute; top: 34px; left: 106px; width: 44px; height: 44px; opacity: .55; }
+.gv-auth-experience .gv-auth-signature { margin: 24px 0 0; color: var(--gv-text-3); font: 9px/1.6 var(--gv-font-mono); letter-spacing: .12em; }
+.gv-auth-experience .gv-auth-form-panel { padding: 28px 0 28px 32px; border: 0; border-left: 1px solid var(--gv-line-strong); border-radius: 0; background: transparent; box-shadow: none; }
+.gv-auth-experience .gv-auth-form-heading .gv-auth-eyebrow { margin-bottom: 10px; color: var(--gv-brand-text); }
+.gv-auth-experience .gv-auth-form-heading h2 { margin: 0; color: var(--gv-text); font-size: 28px; line-height: 1.3; font-weight: 800; letter-spacing: -.03em; overflow-wrap: anywhere; }
+.gv-auth-experience .gv-auth-mode { margin-top: 26px; display: flex; border-bottom: 1px solid var(--gv-line-strong); }
+.gv-auth-experience .gv-auth-mode .gv-button { position: relative; min-height: 44px; flex: 1; border-radius: 0; color: var(--gv-text-2); background: transparent; }
+.gv-auth-experience .gv-auth-mode .gv-button.active { color: var(--gv-text); }
+.gv-auth-experience .gv-auth-mode .gv-button.active::after { content: ""; position: absolute; inset: auto 0 -1px; height: 2px; background: var(--gv-brand); }
+.gv-auth-experience .gv-auth-form { margin-top: 26px; gap: 20px; }
+.gv-auth-experience .gv-auth-form label { gap: 9px; color: var(--gv-text-2); font-size: 12px; }
+.gv-auth-experience .gv-auth-form input { min-width: 0; min-height: 48px; padding: 12px 14px; border-color: var(--gv-line-strong); border-radius: var(--gv-r-xs); background: var(--gv-surface); color: var(--gv-text); font-size: 14px; }
+.gv-auth-experience .gv-auth-form input::placeholder { color: var(--gv-text-3); font-size: 12px; }
+.gv-auth-experience .gv-auth-form input:focus-visible { border-color: var(--gv-focus); outline: 2px solid var(--gv-focus); outline-offset: 3px; box-shadow: none; }
+.gv-auth-experience .gv-auth-error { margin: 0; padding: 10px 12px; border-left: 2px solid var(--gv-danger-text); color: var(--gv-danger-text); background: var(--gv-danger-soft); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.gv-auth-experience .gv-auth-submit { width: 100%; min-height: 48px; margin-top: 4px; border-radius: var(--gv-r-xs); }
+.gv-auth-experience .gv-auth-form-note { margin: -6px 0 0; color: var(--gv-text-3); font-size: 11px; line-height: 1.6; }
+@media (max-width: 991px) {
+  .gv-auth-experience { grid-template-columns: minmax(0, 1fr) minmax(280px, .9fr); gap: 40px; padding: 40px 32px 56px; }
+  .gv-auth-experience .gv-auth-narrative h1 { font-size: clamp(32px, 4.4vw, 44px); }
+  .gv-auth-experience .gv-auth-form-panel { padding-left: 24px; }
+  .gv-auth-experience .gv-auth-media-motif { width: 100%; }
+}
+@media (max-width: 700px) {
+  .gv-auth-experience { min-height: calc(100dvh - var(--gv-header-height)); grid-template-columns: minmax(0, 1fr); align-content: start; gap: 28px; padding: 28px 20px 40px; }
+  .gv-auth-experience .gv-auth-narrative { padding: 0; }
+  .gv-auth-experience .gv-auth-narrative > .gv-auth-eyebrow { margin-bottom: 12px; font-size: 9px; letter-spacing: .1em; }
+  .gv-auth-experience .gv-auth-narrative h1 { font-size: 32px; line-height: 1.2; letter-spacing: -.035em; }
+  .gv-auth-experience .gv-auth-brand-copy { margin-top: 12px; font-size: 13px; line-height: 1.6; }
+  .gv-auth-experience .gv-auth-principles, .gv-auth-experience .gv-auth-media-motif, .gv-auth-experience .gv-auth-signature { display: none; }
+  .gv-auth-experience .gv-auth-form-panel { padding: 24px 0 0; border-left: 0; border-top: 1px solid var(--gv-line-strong); }
+  .gv-auth-experience .gv-auth-form-heading .gv-auth-eyebrow { margin-bottom: 6px; font-size: 9px; }
+  .gv-auth-experience .gv-auth-form-heading h2 { font-size: 25px; }
+  .gv-auth-experience .gv-auth-mode { margin-top: 14px; }
+  .gv-auth-experience .gv-auth-form { margin-top: 20px; gap: 18px; }
+  .gv-auth-experience .gv-auth-form input { font-size: 16px; }
+}
+@media (max-width: 360px) {
+  .gv-auth-experience { padding-inline: 16px; gap: 24px; }
+  .gv-auth-experience .gv-auth-narrative h1 { font-size: 29px; }
+}
