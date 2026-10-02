@@ -155,3 +155,14 @@ Studio:
 - 颜色对比至少 WCAG AA
 - 不用颜色作为状态唯一线索
 - 动态背景必须有足够 overlay 保证文字可读
+
+
+## Phase 4 — Studio workspace 应用范围
+
+仅 `.gv-studio-dashboard`、`.gv-content-page`、`.gv-studio-dialog` 和 `.gv-subtitle-workspace` 使用 studio-workspace.css。原 studio.css 继续服务 Upload/Admin；不整体搬运旧样式。
+
+- Dark 沿用品牌语义令牌。Light 在含上述两个页面的 StudioShell 下使用中性工作区 canvas #f0f1ee、surface #fafbf8、field #e6e8e4 和精确边框。WATCH、Upload、Admin 的令牌不受这些覆盖影响。
+- 数字使用 mono/tabular、真实千分位，分割线与留白建立层级，避免等尺寸 KPI 卡、伪图表和大面积装饰渐变。
+- 内容行普通桌面最小高度 110px；实际处理进度或错误占完整附加行。封面保持 16:9，共享品牌占位状态，不伪造视频内容。
+- Dialog 保留原焦点隔离、忙碌保护、确认警告和请求反馈；深浅主题都使用所在 workspace 的 surface/field，不固定成深色卡。
+- 产品默认行为仍是无合法保存值时 light；已保存 dark/light 仍恢复。视觉 dark-first 不代表默认行为变更。

@@ -60,3 +60,15 @@ Viewports:
 - [ ] `npm run test:e2e`
 - [ ] 不破坏 bundle budget
 - [ ] 不修改后端 API 契约
+
+
+## Phase 4 — 工程验收范围
+
+- CreatorStats 累计字段、零值/无最近作品、可见范围与独立处理数量、加载错误、封面失败。
+- 内容列表 page_size=12、2500ms 轮询、AbortController、同一 DOM 行与弹窗/菜单保留、failed retry -> pending -> 真实轮询。
+- 菜单箭头/Home/End/Escape/外部点击/禁用删除、持久 trigger；编辑/字幕/删除取消和保存后的焦点返回；busy 不能关闭、Tab 不离开 Dialog。
+- FormData 与本地 cover URL lifecycle；字幕上传/默认/删除/错误与默认 badge；删除末页唯一条目返回上一页。
+- 1536x960、1440x900、1180x820、920x900、768x1024、430x932、390x844、320x720，深浅主题；大数字、长标题/简介、12 行、404、菜单与三个 Dialog 边界。
+- 隔离 API E2E 禁止写入真实开发数据；App/theme、Discovery、Playback 原用例回归；未进入 Phase 5。
+
+实际结果与已知边界以 docs/gvideo3-phase4-acceptance.md 为准。截图及一次性预览放在忽略的 tmp/ 下，不属于发布源码。视觉验收等待用户确认，不由自动化通过替代。
