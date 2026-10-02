@@ -76,6 +76,20 @@ WATCH 品牌轨仅承载观看导航与进入 Studio 的入口，不混入整套
 
 封面 hover scale 1.02–1.035，仅在精细指针设备上生效。Drawer/Dialog 不阻塞操作，不使用滚动劫持、大量视差、WebGL 或昂贵 blur。统一尊重 prefers-reduced-motion。
 
+## Phase 2 WATCH 内容发现
+
+首页、最新、热门、关注与收藏使用 `.gv-discovery-page`。共享 VideoCard 的显式变体为 `standard`、`editorial`、`compact`、`ranked`；ranked 必须传入真实排名。其他阶段原有调用省略 variant 时保留旧版信息密度。操作通过 action slot 接入，不把收藏业务移入卡片。
+
+首页 Hero 使用第一页最前 4 条 ready 视频中的第一条，其余最多 3 条为 compact secondary story；Latest 排除 Featured ID，首条 editorial 与普通卡片形成不同密度。独立热门预览再排除已展示 ID，数据不足时减少区域。所有媒体和计数来自现有 API；`q`、`category` 或第二页不展示 discovery Hero。
+
+VideoCover 统一空 URL、加载中和 404 回退。回退使用中性深色表面与已有品牌 SVG；失败后移除远程图片，URL 改变后重新初始化，不循环替换 src。普通卡片 lazy，Hero eager/high priority。封面中的图标是装饰，播放链接提供完整视频标题作为可访问名称。
+
+Phase 2.1：回退统一为抽象 media placeholder，使用既有 mark、极轻 Rose/Cyan glow、细纹与几何线框；不使用摄影图或伪造视频帧。standard 保留占位标签，compact/ranked 减少装饰密度，Hero 图形偏右，移动端进一步简化标签。回退状态处理不变。浅色发现页在 WatchShell 内局部覆盖 canvas/surface/border，暖灰画布与薄媒体边框建立层次，不改变根主题默认或播放页/Studio 的令牌。Hero 桌面标题最多 3 行，单条与移动端最多 2 行，连续 ASCII/数字/下划线安全换行；窄屏描述限制 1 行以保护元信息和 CTA。关注/收藏空状态采用编号 eyebrow、标题与留白、极弱线框图形，不包裹大 Card，文案及 CTA 保持原语义。
+
+热门 01–03 用不同媒体尺度和 Rose 数字建立层级，后续为紧凑 ranked list。分页连续排名使用 API 返回的 page/page_size。关注以 creator identity 和发布时间建立时间流；收藏成功取消后保留条目原有尺寸、隔离隐藏内容并转移焦点，主动更新列表才重新排布。
+
+常规发现网格桌面 3 列、<=991px 2 列、<=520px 1 列。首页桌面为非对称 Hero + secondary story，移动端改为纵向内容；移动 Hero 高度最多 410px，单条长标题需保证 CTA 在 Hero 内。分类可横向滚动，使用原生按钮和 aria-pressed；排序使用真实路由链接并保留查询条件。动效为封面 scale 1.025、轻微抬升，尊重 reduced-motion。
+
 ## 后续页面约束
 
 - 首页 Featured 与 Latest 去重；数据不足时减少 section，搜索/分类/分页保持真实结果。
