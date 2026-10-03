@@ -5,6 +5,10 @@
   .gv-shell .related-panel { position: static; }
   .gv-shell .gv-icon-button, .gv-shell .icon-button:not(.gv-icon-button), .gv-auth-shell .gv-icon-button { min-width: 44px; width: 44px; min-height: 44px; height: 44px; }
   .gv-shell .gv-button, .gv-shell .gv-nav-link, .gv-auth-shell .gv-button { min-height: 44px; }
+  .gv-shell .gv-studio-text-link { min-height: 44px; }
+  .gv-shell .gv-content-title { min-height: 44px; }
+  .pagination { flex-wrap: wrap; }
+  .pagination button { min-width: 44px; width: 44px; min-height: 44px; height: 44px; }
 }
 
 @media (max-width: 520px) {
@@ -131,7 +135,7 @@
   .auth-steps { grid-template-columns: 1fr; }
   .auth-steps span { grid-template-columns: 34px 1fr; }
   .pagination { gap: 4px; }
-  .pagination button { width: 32px; height: 32px; }
+  .pagination button { width: 44px; height: 44px; min-width: 44px; min-height: 44px; }
   .pagination-pages { gap: 4px; }
   .pagination-pages > span { gap: 4px; }
   .management-row { grid-template-columns: 112px minmax(0, 1fr); }

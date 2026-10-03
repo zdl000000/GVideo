@@ -4,6 +4,8 @@ import react from "@vitejs/plugin-react";
 export default defineConfig({
   plugins: [react()],
   build: {
+    // The production CSP permits same-origin images, not data: URLs.
+    assetsInlineLimit: (filePath) => filePath.endsWith("gvideo-mark.svg") ? false : undefined,
     chunkSizeWarningLimit: 550,
     rolldownOptions: {
       output: {

@@ -99,7 +99,7 @@ describe("MyVideosPage workflow", () => {
     fireEvent.click(screen.getByRole("button", { name: "确认删除" }));
     expect(await screen.findByText("投稿及其媒体文件已删除")).toBeTruthy();
     await waitFor(() => expect(screen.getByTestId("location").textContent).toBe(""));
-    expect(vi.mocked(api.myVideos).mock.calls.at(-1)?.[0]?.get("page")).toBe("1");
+    await waitFor(() => expect(vi.mocked(api.myVideos).mock.calls.at(-1)?.[0]?.get("page")).toBe("1"));
   });
   it("2500ms polling updates 20 -> 60 -> ready without replacing rows or losing a dialog", async () => {
     const processing = { ...video, processing_status: "processing" as const, processing_stage: "transcoding", processing_progress: 20 };
@@ -133,6 +133,7 @@ describe("Studio dialogs", () => {
     vi.stubGlobal("URL", class extends URL { static createObjectURL = vi.fn(() => "blob:cover"); static revokeObjectURL = vi.fn(); });
     let finish!: (value: typeof video) => void; vi.mocked(api.updateVideo).mockReturnValue(new Promise((resolve) => { finish = resolve; }));
     const result = render(<EditVideoDialog video={video} categories={["音乐"]} onClose={close} onSaved={saved} />);
+    expect(document.querySelector<HTMLInputElement>('input[type="file"]')?.tabIndex).toBe(-1);
     fireEvent.keyDown(window, { key: "Escape" }); fireEvent.mouseDown(document.querySelector(".dialog-backdrop")!); expect(close).toHaveBeenCalledTimes(2);
     fireEvent.change(document.querySelector('input[type="file"]')!, { target: { files: [new File(["x"], "cover.png", { type: "image/png" })] } });
     fireEvent.click(screen.getByRole("button", { name: "保存修改" }));
@@ -148,6 +149,10 @@ describe("Studio dialogs", () => {
     fireEvent.keyDown(window, { key: "Tab", shiftKey: true }); expect(document.activeElement).toBe(remove);
     fireEvent.keyDown(window, { key: "Escape" }); expect(close).toHaveBeenCalledTimes(1);
     result.rerender(<DeleteVideoDialog video={video} busy onClose={close} onConfirm={confirm} />);
+    const dialog = screen.getByRole("alertdialog");
+    expect(document.activeElement).toBe(dialog);
+    fireEvent.keyDown(window, { key: "Tab" }); expect(document.activeElement).toBe(dialog);
+    fireEvent.keyDown(window, { key: "Tab", shiftKey: true }); expect(document.activeElement).toBe(dialog);
     fireEvent.keyDown(window, { key: "Escape" }); fireEvent.mouseDown(document.querySelector(".dialog-backdrop")!); expect(close).toHaveBeenCalledTimes(1);
     expect(screen.getByText(/数据库记录、原视频、封面、字幕和转码文件/)).toBeTruthy();
   });

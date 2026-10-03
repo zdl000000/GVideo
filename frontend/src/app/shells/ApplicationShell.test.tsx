@@ -12,6 +12,7 @@ vi.mock("../../shared/api/client", () => ({ api: { notifications: vi.fn(), logou
 const user = { id: 1, username: "创作者", avatar_url: "", bio: "", is_admin: false, created_at: "2026-01-01T00:00:00Z" };
 const defaults: ShellProps = { auth: { user, loading: false }, theme: "dark", onThemeChange: vi.fn(), onLogout: vi.fn() };
 let mobile = false;
+let mediaChange: (() => void) | undefined;
 
 function RouteInfo() {
   const location = useLocation();
@@ -24,10 +25,11 @@ function renderShell(path: string, props: ShellProps = defaults) {
 
 beforeEach(() => {
   mobile = false;
+  mediaChange = undefined;
   vi.clearAllMocks();
   vi.mocked(api.notifications).mockResolvedValue({ items: [], page: 1, page_size: 1, total: 0, has_next: false, unread_count: 3 });
   vi.mocked(api.logout).mockResolvedValue({ logged_out: true });
-  vi.stubGlobal("matchMedia", vi.fn((media: string) => ({ media, matches: mobile, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
+  vi.stubGlobal("matchMedia", vi.fn((media: string) => ({ media, get matches() { return mobile; }, addEventListener: vi.fn((_type: string, callback: () => void) => { mediaChange = callback; }), removeEventListener: vi.fn() })));
   vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => { callback(0); return 1; });
   vi.stubGlobal("cancelAnimationFrame", vi.fn());
 });
@@ -97,6 +99,14 @@ describe("ApplicationShell navigation", () => {
     expect(screen.getByRole("complementary", { name: "创作导航" })).toBeTruthy();
     expect(screen.queryByRole("dialog", { name: "导航菜单" })).toBeNull();
     expect(document.body.style.overflow).toBe("");
+  });
+
+  it("移动抽屉打开后resize到desktop将焦点交回main而不是隐藏trigger", async () => {
+    mobile = true; renderShell("/latest"); fireEvent.click(screen.getByRole("button", { name: "打开菜单" }));
+    expect(screen.getByRole("dialog", { name: "导航菜单" }).contains(document.activeElement)).toBe(true);
+    await act(async () => { mobile = false; mediaChange?.(); });
+    expect(screen.queryByRole("dialog", { name: "导航菜单" })).toBeNull(); expect(document.activeElement).toBe(screen.getByRole("main"));
+    expect(document.querySelector("main")?.inert).toBeFalsy(); expect(document.body.style.overflow).toBe("");
   });
 
   it("切换用户时取消旧通知请求，旧结果不覆盖当前未读数", async () => {

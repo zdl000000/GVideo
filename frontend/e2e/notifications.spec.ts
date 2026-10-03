@@ -21,7 +21,7 @@ function uniqueUsername(prefix: string) {
 }
 
 async function expectLoggedIn(page: Page, username: string) {
-  await expect(page.locator('button[title="退出登录"]').first()).toBeAttached({ timeout: 15_000 });
+  await expect(page.locator(".user-chip").first()).toBeAttached({ timeout: 15_000 });
   await expect.poll(() => page.locator(".user-chip").first().textContent(), { timeout: 15_000 }).toContain(username);
 }
 
@@ -36,7 +36,7 @@ async function fillCredentialsAndSubmit(page: Page, username: string, submitLabe
 async function register(page: Page, username: string) {
   await page.goto("/auth");
   await expect(page.locator(".auth-form-wrap form")).toBeVisible({ timeout: 20_000 });
-  await page.locator(".segmented-control").getByRole("button", { name: "注册" }).click();
+  await page.locator(".gv-auth-mode").getByRole("button", { name: "注册" }).click();
   await fillCredentialsAndSubmit(page, username, "创建账号");
 }
 
@@ -47,16 +47,17 @@ async function login(page: Page, username: string) {
 }
 
 async function logout(page: Page) {
-  const desktopLogout = page.locator('.desktop-actions button[title="退出登录"]');
-  if (await desktopLogout.isVisible().catch(() => false)) {
-    await desktopLogout.click();
+  const desktopAccount = page.locator(".gv-account-menu summary");
+  if (await desktopAccount.isVisible().catch(() => false)) {
+    await desktopAccount.click();
+    await page.locator(".gv-account-panel").getByRole("button", { name: "退出登录", exact: true }).click();
   } else {
     // 移动端：退出入口在侧边栏账户区
     await page.locator(".mobile-menu-button").click();
     await page.locator(".mobile-account").getByRole("button", { name: "退出登录" }).click();
   }
   await page.waitForURL((url) => url.pathname === "/", { timeout: 20_000 });
-  await expect(page.locator('button[title="退出登录"]')).toHaveCount(0, { timeout: 15_000 });
+  await expect(page.locator(".user-chip")).toHaveCount(0, { timeout: 15_000 });
 }
 
 async function openNotifications(page: Page) {
@@ -68,7 +69,7 @@ async function openNotifications(page: Page) {
     await page.locator(".sidebar").getByRole("link", { name: "通知中心" }).click();
   }
   await expect(page).toHaveURL(/\/notifications$/, { timeout: 20_000 });
-  await expect(page.locator(".notifications-page")).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator(".gv-notification-center")).toBeVisible({ timeout: 20_000 });
 }
 
 test("uploader receives the commenter's notification and can mark all read", async ({ page }) => {
@@ -81,7 +82,7 @@ test("uploader receives the commenter's notification and can mark all read", asy
   // B 注册后进入投稿上传页（分类取首个可用分区；上传为异步转码，跳转即视为提交成功）
   await register(page, userB);
   await page.goto("/upload");
-  const titleInput = page.getByLabel("标题");
+  const titleInput = page.getByLabel(/^标题/);
   await expect(titleInput).toBeVisible({ timeout: 20_000 });
   await titleInput.fill(videoTitle);
   const categorySelect = page.getByLabel("分区");
@@ -110,7 +111,7 @@ test("uploader receives the commenter's notification and can mark all read", asy
   // B 登录并打开通知中心，至少能看到一条 A 的评论通知
   await login(page, userB);
   await openNotifications(page);
-  const commentNotice = page.locator(".notification-row").filter({ hasText: commentMarker });
+  const commentNotice = page.locator(".gv-notification-row").filter({ hasText: commentMarker });
   await expect(commentNotice.first()).toBeVisible({ timeout: 30_000 });
   await expect(commentNotice.first()).toContainText(userA);
   await expect(commentNotice.first()).toContainText(videoTitle);
@@ -121,7 +122,7 @@ test("uploader receives the commenter's notification and can mark all read", asy
   await expect(markAllButton).toBeEnabled({ timeout: 15_000 });
   await markAllButton.click();
   await expect(page.getByText("所有通知都已读")).toBeVisible({ timeout: 15_000 });
-  await expect(page.locator(".notification-row.unread")).toHaveCount(0, { timeout: 15_000 });
+  await expect(page.locator(".gv-notification-row.unread")).toHaveCount(0, { timeout: 15_000 });
   await expect(commentNotice.first()).not.toHaveClass(/unread/);
   await expect(markAllButton).toBeDisabled();
 

@@ -51,5 +51,6 @@
 }
 .gv-video-card .cover-link:focus-visible .play-overlay { opacity: 1; transform: translate(-50%, -50%) scale(1); }
 @media (prefers-reduced-motion: reduce) {
-  .gv-video-hero .gv-cover-image, .gv-video-card .cover-link, .gv-video-card .gv-cover-image { transform: none !important; }
+  .gv-video-hero .gv-cover-image, .gv-video-card .cover-link, .gv-video-card .gv-cover-image,
+  .featured-lead > img, .featured-mini-cover > img, .cover-link img, .related-cover img, .management-cover img { transform: none !important; }
 }

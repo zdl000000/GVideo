@@ -48,7 +48,7 @@ export function EditProfileDialog({ profile, onClose, onSaved }: { profile: Crea
             <Avatar username={username || profile.username} src={avatarPreview} size="large" />
             <button type="button" className="secondary-button compact" onClick={() => avatarRef.current?.click()}><ImagePlus size={16} />更换头像</button>
             <span>JPEG、PNG 或 WebP</span>
-            <input ref={avatarRef} className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setAvatar(event.target.files?.[0] || null)} />
+            <input ref={avatarRef} className="sr-only" type="file" tabIndex={-1} accept="image/jpeg,image/png,image/webp" onChange={(event) => setAvatar(event.target.files?.[0] || null)} />
           </div>
           <div className="stack-form profile-fields">
             <label>用户名<input autoFocus value={username} onChange={(event) => setUsername(event.target.value)} minLength={3} maxLength={24} required /></label>

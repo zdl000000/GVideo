@@ -93,6 +93,25 @@ describe("AuthPage", () => {
     fireEvent.submit(screen.getByRole("form")); await screen.findByTestId("destination"); expect(api.login).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps keyboard focus in the busy form and returns it to the original field after an error", async () => {
+    let reject!: (error: Error) => void;
+    vi.mocked(api.login).mockReturnValue(new Promise((_, fail) => { reject = fail; }));
+    renderAuth(); fillCredentials(); const password = screen.getByLabelText("密码"); password.focus();
+    fireEvent.submit(screen.getByRole("form")); expect(document.activeElement).toBe(screen.getByRole("form"));
+    await act(async () => reject(new Error("隔离登录失败")));
+    expect(screen.getByRole("alert").textContent).toBe("隔离登录失败"); expect(document.activeElement).toBe(password);
+  });
+
+  it("does not steal focus moved outside the busy form", async () => {
+    let reject!: (error: Error) => void;
+    vi.mocked(api.login).mockReturnValue(new Promise((_, fail) => { reject = fail; }));
+    renderAuth(); fillCredentials(); const password = screen.getByLabelText("密码"); password.focus();
+    fireEvent.submit(screen.getByRole("form"));
+    const heading = screen.getByRole("heading", { name: "登录 GVideo" }); heading.tabIndex = -1; heading.focus();
+    await act(async () => reject(new Error("隔离登录失败")));
+    expect(document.activeElement).toBe(heading);
+  });
+
   for (const mode of ["login", "register"] as const) {
     it.each([["/video/1", "/video/1"], ["/video/1?from=auth", "/video/1?from=auth"], ["//evil.com", "/"], ["http://evil.com", "/"]])(`${mode} accepts internal next and rejects external next: %s`, async (next, expected) => {
       renderAuth(`/auth?next=${encodeURIComponent(next)}`);

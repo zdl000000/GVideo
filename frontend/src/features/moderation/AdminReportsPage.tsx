@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check, CircleCheck, CircleX, Clock3, Flag, ScanEye, X } from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../../shared/api/client";
@@ -37,6 +37,18 @@ const reportStatusIcons = { pending: Clock3, reviewed: ScanEye, resolved: Circle
 
 function ReportRow({ report, busy, onReview }: { report: VideoReport; busy: number | null; onReview: (report: VideoReport, status: VideoReportStatus) => void }) {
   const StatusIcon = reportStatusIcons[report.status];
+  const titleRef = useRef<HTMLAnchorElement>(null);
+  const actionFocusRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    const trigger = actionFocusRef.current;
+    if (!trigger) return;
+    if (document.activeElement === document.body || document.activeElement === trigger) titleRef.current?.focus();
+    if (busy !== report.id) actionFocusRef.current = null;
+  }, [busy, report.id, report.status]);
+  const review = (trigger: HTMLButtonElement, status: VideoReportStatus) => {
+    actionFocusRef.current = document.activeElement === trigger ? trigger : null;
+    onReview(report, status);
+  };
   return (
     <article className="gv-report-row" aria-labelledby={`report-title-${report.id}`} aria-busy={busy === report.id} data-status={report.status}>
       <div className="gv-report-state">
@@ -44,7 +56,7 @@ function ReportRow({ report, busy, onReview }: { report: VideoReport; busy: numb
         <span className="gv-report-id">REPORT / #{report.id}</span>
       </div>
       <div className="gv-report-content">
-        <h2 id={`report-title-${report.id}`}><Link to={`/video/${report.video_id}`}>{report.video_title || `视频 #${report.video_id}`}</Link></h2>
+        <h2 id={`report-title-${report.id}`}><Link ref={titleRef} to={`/video/${report.video_id}`}>{report.video_title || `视频 #${report.video_id}`}</Link></h2>
         <p className="gv-report-reason"><Flag size={13} aria-hidden="true" /><span>{reportReasonLabels[report.reason] || report.reason}</span></p>
         <p className={`gv-report-detail${report.detail ? "" : " gv-report-detail--empty"}`}>{report.detail || "举报人未填写补充说明"}</p>
         <div className="gv-report-people">
@@ -57,9 +69,9 @@ function ReportRow({ report, busy, onReview }: { report: VideoReport; busy: numb
         </div>
       </div>
       <div className="gv-report-actions" role="group" aria-label={`处理举报 #${report.id}`}>
-        <button type="button" disabled={Boolean(busy) || report.status === "reviewed"} onClick={() => onReview(report, "reviewed")}><Clock3 size={15} aria-hidden="true" />审核中</button>
-        <button type="button" disabled={Boolean(busy) || report.status === "resolved"} onClick={() => onReview(report, "resolved")}><Check size={15} aria-hidden="true" />处理完成</button>
-        <button type="button" className="gv-report-dismiss" disabled={Boolean(busy) || report.status === "dismissed"} onClick={() => onReview(report, "dismissed")}><X size={15} aria-hidden="true" />驳回</button>
+        <button type="button" disabled={Boolean(busy) || report.status === "reviewed"} onClick={(event) => review(event.currentTarget, "reviewed")}><Clock3 size={15} aria-hidden="true" />审核中</button>
+        <button type="button" disabled={Boolean(busy) || report.status === "resolved"} onClick={(event) => review(event.currentTarget, "resolved")}><Check size={15} aria-hidden="true" />处理完成</button>
+        <button type="button" className="gv-report-dismiss" disabled={Boolean(busy) || report.status === "dismissed"} onClick={(event) => review(event.currentTarget, "dismissed")}><X size={15} aria-hidden="true" />驳回</button>
         {busy === report.id && <span className="gv-report-busy" role="status">正在更新举报状态…</span>}
       </div>
     </article>
