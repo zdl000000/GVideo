@@ -1,5 +1,9 @@
 # GVideo 3.0 Phase 6 — Final QA / Release Candidate 验收报告
 
+> **后续状态（2026-10-03）**：用户已通过 Phase 6 最终工程与视觉验收，确认 GVideo 3.0 Release Candidate，不需要 Phase 6.1。Phase 6 已经由 [PR #43](https://github.com/zdl000000/GVideo/pull/43) squash merge 到 main，RC 基线为 [`e2c3a63`](https://github.com/zdl000000/GVideo/commit/e2c3a63fb84faea647d396b5e0ff622d535e09ba)。默认主题正式选择 OPTION A：保持 Light。未创建新的正式 Release Tag，未部署生产环境。
+>
+> 以下正文是**合并前的原始验收快照**；测试结果、失败及复验记录、日期、`af48544` 基线与“未提交”状态均保持原样。`C:/Users/...` 与 `tmp/` 证据路径仅为历史本地记录，不是公共素材链接。已记录的未验证范围继续保留；新版 README 正式截图另见 [素材说明](assets/gvideo3/sources.md)。
+
 日期：2026-10-03。**Phase 6 工程验收完成：完整 isolated E2E、SAFE、Phase 1–5 回归、headers、真实只读回归、16 张截图、项目综合检查和 diff 检查均通过。正式必测范围内未发现未解决的 release blocker，建议交用户最终确认 Release Candidate；尚未 commit、push、创建 PR 或发布。**
 
 状态约定：**PASS** = 有已完成检查证据；**FIXED** = 明确缺陷已修复并通过对应回归；**KNOWN LIMITATION** = 已知边界；**NOT VERIFIED** = 未验证。未验证项目不能当作通过。

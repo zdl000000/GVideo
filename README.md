@@ -4,19 +4,48 @@ GVideo 是一个面向视频创作者与观众的社区型全栈项目。项目�
 
 当前版本已打通注册登录、视频投稿、媒体处理、发现与播放、作者空间、关注动态、点赞收藏、评论通知、举报审核、创作者工作台和字幕管理等主要流程。
 
-## 演示
+当前 UI 为 **GVideo 3.0 Release Candidate**：Phase 1–6 已完成工程与视觉验收，RC 基线为 [`e2c3a63`](https://github.com/zdl000000/GVideo/commit/e2c3a63fb84faea647d396b5e0ff622d535e09ba)（[PR #43](https://github.com/zdl000000/GVideo/pull/43)）。这次 UI 重构没有发布 `v3.0.0` 正式版或部署生产环境。
 
-<p align="center"><img src="docs/assets/home.jpg" alt="GVideo 首页：最新发布与分区浏览" width="880" /></p>
+- **WATCH**：内容发现、播放与评论、创作者频道，媒体优先的阅读层次与响应式布局。
+- **STUDIO**：创作概览、投稿管理、发布与字幕工作流；字幕管理继续只在 `/me/videos`。
+- **Auth / Activity / Governance**：登录注册、通知中心与管理员审核，沿用原有权限和 API 契约。
+- **主题**：默认 Light，可切换 Dark 并保存偏好；播放器在两种主题下均保留深色媒体表面。
 
-| 播放与评论 | 创作者工作台 |
+## 界面展示
+
+以下为 RC 实际运行界面，使用独立演示数据库中的开放影片片段。账号、投稿与统计属于演示环境，不代表真实运营数据；截图未经界面合成或功能状态改写。
+
+<p align="center"><img src="docs/assets/gvideo3/home-light.jpg" alt="GVideo 3.0 Light 首页：品牌导航、精选影像与内容发现" width="880" /></p>
+
+| WATCH Dark | 播放与评论 |
 | --- | --- |
-| <img src="docs/assets/watch.jpg" alt="播放页：HLS 播放、清晰度选择与评论" width="430" /> | <img src="docs/assets/creator-dashboard.jpg" alt="创作者工作台：投稿管理与处理状态" width="430" /> |
+| <img src="docs/assets/gvideo3/home-dark.jpg" alt="GVideo 3.0 Dark 首页：保存后的深色主题" width="430" /> | <img src="docs/assets/gvideo3/watch-light.jpg" alt="Light 播放页：深色播放器、作品信息与相关内容" width="430" /> |
 
-| 通知中心 | 深色主题 |
+| STUDIO 概览 | 投稿管理 |
 | --- | --- |
-| <img src="docs/assets/notifications.jpg" alt="通知中心：互动与媒体处理通知" width="430" /> | <img src="docs/assets/home-dark.jpg" alt="深色主题首页" width="430" /> |
+| <img src="docs/assets/gvideo3/studio-light.jpg" alt="STUDIO 创作概览：投稿统计、创作入口与最近作品" width="430" /> | <img src="docs/assets/gvideo3/content-light.jpg" alt="STUDIO 投稿管理：作品列表、可见性与处理状态" width="430" /> |
 
-截图中的演示投稿使用 Blender 开放影片（CC-BY）素材。工程叙事见 [工程案例](docs/case-study.md)，领域词汇见 [CONTEXT.md](CONTEXT.md)，关键取舍见 [架构决策记录](docs/adr/)。
+| 发布工作流 | 登录 |
+| --- | --- |
+| <img src="docs/assets/gvideo3/publish-light.jpg" alt="发布页首屏：视频文件、作品信息与封面设置" width="430" /> | <img src="docs/assets/gvideo3/auth-light.jpg" alt="独立 Auth 页面：登录表单与 GVideo 品牌" width="430" /> |
+
+<p align="center"><img src="docs/assets/gvideo3/mobile-home-light.jpg" alt="390px 移动端 Light 首页：紧凑导航与精选影像" width="300" /></p>
+
+演示媒体：Big Buck Bunny 与 Sintel，© Blender Foundation，[CC BY 3.0](https://creativecommons.org/licenses/by/3.0/)。片段经截取、编码，封面由实际视频提取；完整来源、署名与采集信息见 [展示素材说明](docs/assets/gvideo3/sources.md)。工程叙事见 [工程案例](docs/case-study.md)，领域词汇见 [CONTEXT.md](CONTEXT.md)，关键取舍见 [架构决策记录](docs/adr/)。
+
+## RC 验收基线
+
+以下为 `e2c3a63` 对应的 Phase 6 最终验收记录，并非本次文档更新重新运行或累加多轮测试的结果。
+
+| 检查 | 结果 |
+| --- | --- |
+| Vitest | 252 passed（21 个文件） |
+| 完整隔离 E2E | 229 passed / 11 conditional skipped / 0 failed；桌面与移动 Chromium 项目 |
+| 真实环境只读回归 | 48 passed |
+| Nginx 安全响应头 | 12 passed |
+| Typecheck / build / bundle budget / `scripts/check.ps1` | passed |
+
+WebKit / Safari、native HLS 浏览器播放、实体手机与 HTTPS/TLS 未完成实测；部分真实持久操作仅验证模拟 API 契约，不能视作完整真实数据库写入验证。条件跳过、首轮失败及复验范围见 [Phase 6 验收报告](docs/gvideo3-phase6-acceptance.md)。
 
 ## 核心能力
 
@@ -89,16 +118,17 @@ docker compose up --build -d
 .\scripts\check.ps1
 ```
 
-运行本地完整验收：
+完整验收会注册账号、上传媒体并修改互动、字幕等持久数据，**必须先准备并核对独立数据库与媒体卷，不得指向原开发库或生产库**。默认 `acceptance.ps1` 地址为 `8088`，会连接上面的共享开发数据；脚本不会自动创建隔离环境。环境准备、实际参数与当前 E2E 的隔离门禁见 [运维验收说明](docs/operations.md#完整验收)。
+
+首次运行浏览器验收前安装 Chromium：
 
 ```powershell
 cd frontend
 npx playwright install chromium chromium-headless-shell
 cd ..
-.\scripts\acceptance.ps1
 ```
 
-验收脚本覆盖健康检查、真实 API 用户旅程、媒体处理、权限、互动、字幕和桌面/移动浏览器流程。备份恢复可通过 `-IncludeBackupRestore` 纳入验收。
+验收脚本覆盖健康检查、真实 API 用户旅程、媒体处理、权限、互动、字幕和桌面/移动浏览器流程。`-IncludeBackupRestore` 还会触发备份恢复演练，须另外核对其目标 Compose 项目与恢复卷。
 
 ## 项目结构
 
@@ -112,7 +142,7 @@ backend/
   internal/media/         FFprobe、FFmpeg 与媒体任务 worker
   internal/platform/      数据库初始化和兼容迁移
 frontend/
-  src/app/                目标应用组合与全局 Provider
+  src/app/                应用组合、路由守卫与 WATCH/STUDIO/Auth Shell
   src/features/           按业务能力组织的功能模块
   src/shared/             共享 API、组件、工具与类型
 docs/                     架构、部署、运维、设计和开发规范
@@ -146,6 +176,8 @@ scripts/                  开发、检查、验收、备份和恢复脚本
 - [项目专项开发规范](docs/project-standards.md)
 - [前端设计系统](docs/design-system.md)
 - [GVideo 3.0 重构进度](docs/gvideo3-progress.md)
+- [Phase 6 / RC 验收报告](docs/gvideo3-phase6-acceptance.md)
+- [正式展示素材与媒体来源](docs/assets/gvideo3/sources.md)
 - [贡献指南](.github/CONTRIBUTING.md)
 - [安全策略](.github/SECURITY.md)
 - [变更记录](CHANGELOG.md)

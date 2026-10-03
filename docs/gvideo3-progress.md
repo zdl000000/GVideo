@@ -2,7 +2,17 @@
 
 更新日期：2026-10-03。
 
-## 当前范围
+## 当前状态
+
+GVideo 3.0 Phase 1–6 已完成并通过最终工程与视觉验收。Phase 6 经 [PR #43](https://github.com/zdl000000/GVideo/pull/43) squash merge 到 main，UI Release Candidate 基线为 [`e2c3a63`](https://github.com/zdl000000/GVideo/commit/e2c3a63fb84faea647d396b5e0ff622d535e09ba)。不需要 Phase 6.1，不再继续本轮 UI 开发。
+
+默认主题正式选择 **OPTION A：保持 Light**；无合法偏好时为 Light，已保存的 Dark/Light 偏好继续恢复。未创建新的正式 Release Tag，未部署生产环境；既有 `v1.0.0` 是历史发布，不代表 UI 3.0 正式版。
+
+最终验证范围、条件跳过和已知限制见 [Phase 6 验收报告](gvideo3-phase6-acceptance.md)。当前 README 正式展示素材见 [截图与媒体来源](assets/gvideo3/sources.md)。本次收尾只同步文档和展示素材，不改变产品源码、依赖、配置或已通过的测试。
+
+## Phase 6 历史验收快照（合并前）
+
+以下保留验收当时的基线、未提交状态和本地证据。文中的“等待最终确认”“HEAD 仍为 af48544”“41 文件未提交”属于合并前历史，不代表当前 main；本机绝对路径与 `tmp/` 是历史本地记录，不是公共下载链接。
 
 Phase 5 已通过 PR #42 squash merge 到 main `af48544`，本地 main、origin/main 与 GitHub main 已同步。Phase 6 从干净的该基线创建 `codex/gvideo3-final-qa`，只做明确缺陷修复与最终验收，默认保持 light；不 commit、不 push、不创建 PR、不发布。
 

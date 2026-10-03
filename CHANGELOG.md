@@ -6,6 +6,11 @@ GVideo 的重要变更记录在此。项目在首次正式发布后遵循语义�
 
 ### 变更
 
+- GVideo 3.0 UI Release Candidate：Phase 1–6 已验收，Phase 6 经 PR #43 合并，RC 基线 `e2c3a63`。重构 WATCH 内容发现、播放与创作者频道，STUDIO 概览、投稿管理与发布/字幕工作流，以及 Auth / Activity / Governance 界面；沿用原有 API、数据和权限契约。
+- 完成响应式、Light/Dark、键盘焦点、忙碌状态、对比度、触控目标与 Reduced Motion 等最终 QA。默认主题正式保持 Light，已保存的 Dark/Light 偏好继续恢复。
+- RC 验收快照：252 unit passed；桌面/移动 Chromium 完整隔离 E2E 229 passed / 11 conditional skipped / 0 failed；真实环境只读 48 passed；安全响应头 12 passed；build、bundle budget 与 `scripts/check.ps1` passed。各轮存在覆盖重叠，不合计测试数量。
+- 保留 WebKit/Safari/native HLS 浏览器播放、实体手机、HTTPS/TLS 与部分真实持久操作的未验证范围，详见 [Phase 6 验收报告](docs/gvideo3-phase6-acceptance.md)。未创建 `v3.0.0` 正式 Release Tag，未部署生产环境。
+- README 展示同步到当前 RC，正式截图、隔离演示数据与开放影片署名见 [素材说明](docs/assets/gvideo3/sources.md)；旧版展示图片保留为历史资料。
 - 依赖维护批次：升级 `react` / `react-dom` 19.3.0、`@types/react` / `@types/react-dom` 19.3.0、`react-router-dom` 7.18.4、`@vitejs/plugin-react` 6.1.1、`@playwright/test` 1.63.0；全量门禁通过。
 - `scripts/check.ps1` 在未显式设置 `GOPROXY` 时默认走 `goproxy.cn`（与 backend/Dockerfile 一致），修复受限网络下 Go 测试无法拉取依赖导致的门禁失败。
 

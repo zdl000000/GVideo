@@ -1,10 +1,20 @@
 # GVideo 开发交接
 
-> 更新日期：2026-09-15
-> 当前状态：`main`（v1.0.0 已发布；发布后完成批次 33–35 与 P2 立项，见 §1）
+> 更新日期：2026-10-03
+> 当前状态：GVideo 3.0 Phase 1–6 已验收；Phase 6 经 PR #43 squash merge，UI RC 验收基线为 `e2c3a63`。
 > 交接原则：实现、目标验证、只读复审、显式暂存、提交和推送必须串行；分支推送不代表生产发布获批。
 
 ## 1. 当前状态
+
+GVideo 3.0 UI 重构已封版，不需要 Phase 6.1；默认主题正式保持 Light，保存的 Dark/Light 偏好继续恢复。当前只同步文档与正式展示素材，不修改产品代码；没有新的正式 Release Tag，未部署生产环境。
+
+当前规范、验收范围及限制见 [设计系统](design-system.md)、[重构进度](gvideo3-progress.md) 和 [Phase 6 报告](gvideo3-phase6-acceptance.md)。当前 RC 结果为 252 unit passed、完整隔离 E2E 229 passed / 11 conditional skipped / 0 failed（桌面与移动 Chromium）；不与以下历史轮次累加。
+
+交付仍通过 PR 与 Frontend / Backend / Backend Race 检查并保持线性历史；最近 UI 阶段使用 squash merge。每次 commit、push、合并、Tag 或部署以当次用户授权和仓库规则为准。文档与正式展示素材已完成审阅；提交与合并状态以对应 Git 记录为准。UI RC 验收基线仍为 `e2c3a63`。
+
+## 2. 历史交接快照（2026-09-15）
+
+以下批次、测试数量、当时的维护队列与工作程序保留历史事实，不代表当前 UI 状态，也不构成启动新功能或发布的授权。涉及本机或 `tmp/` 的证据为历史本地记录。
 
 ✅ **v1.0.0 已发布；发布后完成批次 33–35**——批次 35 为仓库整理：README 文档导航补全（契约与可观测性四份文档）、`scripts/merge-local-data.ps1` 登记到 operations.md、历史交接记录归档到 [handoff-archive.md](./handoff-archive.md)（批次 27–31 的实现细节、证据与交付点），主文档回归当前状态与近期记录。批次 29–31 的领域词表、ADR、工程案例与演示截图已随 v1.0.0 进入仓库。
 
@@ -18,9 +28,9 @@
 
 **批次 33（2026-09-15，依赖维护）**：一次性应用待处理的 dependabot 升级并在本地完成全量验证——后端 `chi` 5.3.2 / `x/crypto` 0.56.0 / `sqlite` 1.58.0，前端 `lucide-react` 1.45.0 / `vite` 8.3.0 / `@types/react-dom` 19.2.5 / `vitest` 5.0.0；`hls.js` 1.7.x 因超出 HLS bundle 预算（raw 575.83 kB / gzip 177.04 kB vs 550/170）**暂缓**，对应 PR #15 保留待专项评估。**数字更正**：前端 vitest 全量基数为 **14 文件 / 52 例**；此前 PR/Release 文案中的「31 项」来自一次 VideoPlayer 测试文件 worker 启动超时的残缺运行（该 flake 表现为 13 文件/31 例 + 1 error、check.ps1 非零退出，重跑恢复），已在 GitHub 文案中更正并作为已知问题记录。
 
-交付程序（现行）：改动走短生命周期分支 → PR → Backend / Backend Race / Frontend 三项 CI 通过后 rebase 合并 `main`；不得直接推送 main、不得 amend / force push、不得使用 `git add .`。批次 29–34 的提交流水见 §6.3–§6.8 与归档文件。
+交付程序（2026-09-15 当时约定）：改动走短生命周期分支 → PR → Backend / Backend Race / Frontend 三项 CI 通过后 rebase 合并 `main`；不得直接推送 main、不得 amend / force push、不得使用 `git add .`。批次 29–34 的提交流水见 §6.3–§6.8 与归档文件。
 
-## 3. 验证证据边界
+## 3. 历史验证证据边界
 
 2026-09-15 批次 36（P2 立项）证据：
 
@@ -48,7 +58,7 @@
 
 更早批次（27–31）的实现细节与证据已归档到 [handoff-archive.md](./handoff-archive.md)。
 
-## 4. 已完成队列
+## 4. 已完成历史批次
 
 1. `BASE-03A`：管理监听地址生产安全校验。
 2. `BASE-03B`：管理端口独立启停和端口冲突 fail-fast 测试。
@@ -87,7 +97,7 @@
 35. `DOC-05`：仓库整理——README 文档导航补齐契约/可观测性四份文档；`merge-local-data.ps1` 登记到 operations.md；`development-handoff.md` 拆分出 `docs/handoff-archive.md`（批次 27–31 实现细节/证据/交付点）并修正 §1 与交付程序；清理工作区残留日志。
 36. `P2-01`：新项目立项——**order-saga**（订单/库存/支付 Saga，Go + PostgreSQL + Redis + Kafka，四服务），ADR-0001~0005 + CONTEXT.md + 四服务骨架 + 已验证 compose 入库（私有仓库 `zdl000000/order-saga`）。本批。
 
-## 5. 当前任务与后续队列
+## 5. 历史任务与后续队列（2026-09-15）
 
 2026-09-14 方向调整（已确认）：**停止功能与加固开发**，主线转为打包发布与分布式演进：
 
@@ -97,7 +107,7 @@
 
 维护队列（计划内、按需触发，不再作为主线）：`SEC-04b` 配额可观测性、`SEC-05b` nginx 容器降权、环境治理（历史损坏测试视频清理）、OpenAPI、依赖安全扫描。
 
-## 6. 团队调度与验收
+## 6. 历史团队调度与验收
 
 - 总控执行写入、测试、容器重建和 Git 操作；架构评审、安全复审与前端工程 Agent 只读/受限并行（平台并发上限 2）。
 - 本周期两波并行：第一波 notifications 模块 + E2E 旅程（均已随 `2e01b27` 交付）；第二波 comments 模块 + CSP 收紧 + auth 竞态修复（批次 27）。复审按批分片，agent 启动失败时降级为总控复审并留痕。
@@ -148,7 +158,9 @@
 - 骨架内容：四服务健康检查（零依赖可编译）、`deploy/docker-compose.yaml`（PG 17 / Redis 7 / Kafka KRaft 健康检查 + 每服务独立 database init）、CONTEXT.md 领域词表、README（范围/架构/路线 M1–M5）。
 - 后续：order-saga 按 M1–M5 推进（proto 契约 → 主链路 → 支付与超时 → 治理 → 交付）；GVideo 维护队列按需触发。
 
-## 7. 最终门禁与 Git
+## 7. 历史门禁与 Git（2026-09-15）
+
+以下本机路径、分支名和 compare 地址仅记录当时的交付方式，不是当前操作指令或有效分支入口。本轮文档分支为 `codex/gvideo3-docs-showcase`；完成审阅前不 commit、push、创建 Tag 或部署。
 
 ```powershell
 cd C:\Users\SkyShow\Documents\ChatGPT\GVideo
@@ -165,4 +177,4 @@ git -c http.version=HTTP/1.1 push -u origin codex/security-hardening
 
 本机没有 GitHub CLI 时不虚构 PR。推送后可从以下地址创建 PR：
 
-https://github.com/zdl000000/GVideo/compare/main...codex/security-hardening
+`https://github.com/zdl000000/GVideo/compare/main...codex/security-hardening`
