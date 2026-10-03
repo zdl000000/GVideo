@@ -23,10 +23,12 @@
 .gv-notification-center time { margin-left: auto; font-size: 10px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .gv-notification-center .gv-notification-copy > a { display: flex; align-items: center; min-height: 44px; width: fit-content; max-width: 100%; color: var(--gv-text); font-size: 15px; font-weight: 650; line-height: 1.55; text-decoration: none; overflow-wrap: anywhere; }
 .gv-notification-center .gv-notification-row.read .gv-notification-copy > a { font-weight: 500; }
-.gv-notification-center .gv-notification-copy > a:hover { text-decoration: underline; text-underline-offset: 4px; }
+@media (hover: hover) and (pointer: fine) {
+  .gv-notification-center .gv-notification-copy > a:hover { text-decoration: underline; text-underline-offset: 4px; }
+  .gv-notification-center .gv-notification-read-button:hover:not(:disabled) { border-color: var(--gv-line-strong); background: var(--gv-surface-2); color: var(--gv-text); }
+}
 .gv-notification-center .gv-notification-copy p { margin: 0; color: var(--gv-text-2); font-size: 12px; line-height: 1.65; overflow-wrap: anywhere; white-space: pre-wrap; }
 .gv-notification-center .gv-notification-read-button { display: grid; place-items: center; width: 44px; height: 44px; padding: 0; border: 1px solid transparent; border-radius: var(--gv-r-xs); color: var(--gv-text-2); background: transparent; }
-.gv-notification-center .gv-notification-read-button:hover:not(:disabled) { border-color: var(--gv-line-strong); background: var(--gv-surface-2); color: var(--gv-text); }
 .gv-notification-center .gv-notification-read-button:disabled { cursor: wait; opacity: .5; }
 .gv-notification-center .gv-notification-read-status { color: var(--gv-text-3); font-size: 11px; }
 .gv-notification-center a:focus-visible, .gv-notification-center button:focus-visible { outline: 2px solid var(--gv-focus); outline-offset: 4px; }

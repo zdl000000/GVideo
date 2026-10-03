@@ -76,6 +76,7 @@ describe("CreatorPage", () => {
     expect(screen.getByRole("link", { name: "创作者中心" }).getAttribute("href")).toBe("/creator");
     fireEvent.click(edit);
     await screen.findByRole("dialog", { name: "编辑作者信息" });
+    expect(document.querySelector<HTMLInputElement>('input[type="file"]')?.tabIndex).toBe(-1);
     fireEvent.change(screen.getByLabelText("用户名"), { target: { value: "更新作者" } });
     fireEvent.change(screen.getByRole("textbox", { name: /^个人简介/ }), { target: { value: "更新简介" } });
     fireEvent.click(screen.getByRole("button", { name: "保存资料" }));

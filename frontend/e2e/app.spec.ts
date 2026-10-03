@@ -148,7 +148,10 @@ test("mobile navigation opens as a bounded, keyboard-dismissible panel", async (
   await expect(menuButton).toHaveAttribute("aria-expanded", "true");
   await expect(page.locator(".sidebar.open")).toBeVisible();
   const sidebar = await page.locator(".sidebar.open").boundingBox();
-  expect(sidebar?.width || 0).toBeLessThanOrEqual(280);
+  expect(sidebar).not.toBeNull();
+  expect(sidebar!.width).toBeGreaterThan(0);
+  // Transformed bounds can include subpixel floating-point noise.
+  expect(sidebar!.width).toBeLessThanOrEqual(280 + 0.01);
   await expectNoHorizontalOverflow(page);
 
   await page.keyboard.press("Escape");

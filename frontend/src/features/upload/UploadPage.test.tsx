@@ -28,6 +28,12 @@ function fill() {
   fireEvent.change(screen.getByLabelText("分区"), { target: { value: "生活" } });
   fireEvent.click(screen.getByRole("radio", { name: /^仅自己/ }));
 }
+function uploadRequest() {
+  let resolve!: (value: ReturnType<typeof videoFixture>) => void;
+  let reject!: (reason: Error) => void;
+  const promise = new Promise<ReturnType<typeof videoFixture>>((done, fail) => { resolve = done; reject = fail; });
+  return { promise, resolve, reject };
+}
 beforeEach(() => {
   vi.resetAllMocks();
   vi.mocked(api.categories).mockResolvedValue(["音乐", "生活"]);
@@ -127,5 +133,38 @@ describe("UploadPage", () => {
     expect(await screen.findByRole("alert")).toHaveProperty("textContent", "分区不可用"); cleanup();
     vi.mocked(api.categories).mockResolvedValue(["音乐", "生活"]); vi.mocked(api.upload).mockRejectedValue(new Error("上传失败")); await mount(); fill(); fireEvent.click(screen.getByRole("button", { name: "发布作品" }));
     expect(await screen.findByRole("alert")).toHaveProperty("textContent", "上传失败"); expect(screen.getByText(video.name)).toBeTruthy();
+  });
+  it("focused submit keeps keyboard context on cancel while busy and returns after cancellation", async () => {
+    vi.mocked(api.upload).mockImplementation((_form, _progress, signal) => new Promise((_resolve, reject) => signal!.addEventListener("abort", () => reject(new DOMException("cancel", "AbortError")), { once: true })));
+    await mount(); fill(); const submit = screen.getByRole("button", { name: "发布作品" });
+    submit.focus(); fireEvent.click(submit);
+    const cancel = screen.getByRole("button", { name: "取消上传" }); expect(document.activeElement).toBe(cancel);
+    fireEvent.click(cancel); await screen.findByRole("alert");
+    expect(document.activeElement).toBe(submit); expect(screen.getByText(video.name)).toBeTruthy();
+  });
+  it("upload failure restores focused submit from the removed cancel action", async () => {
+    const request = uploadRequest(); vi.mocked(api.upload).mockReturnValue(request.promise);
+    await mount(); fill(); const submit = screen.getByRole("button", { name: "发布作品" });
+    submit.focus(); fireEvent.click(submit); expect(document.activeElement).toBe(screen.getByRole("button", { name: "取消上传" }));
+    await act(async () => request.reject(new Error("焦点验收上传失败")));
+    expect(screen.getByRole("alert").textContent).toBe("焦点验收上传失败"); expect(document.activeElement).toBe(submit);
+  });
+  it("implicit form submission from a focused title field keeps focus on the busy cancel action", async () => {
+    vi.mocked(api.upload).mockImplementation((_form, _progress, signal) => new Promise((_resolve, reject) => signal!.addEventListener("abort", () => reject(new DOMException("cancel", "AbortError")), { once: true })));
+    await mount(); fill(); const title = screen.getByLabelText(/^标题/); title.focus();
+    fireEvent.submit(screen.getByRole("form", { name: "发布新作品" }));
+    const cancel = screen.getByRole("button", { name: "取消上传" }); expect(document.activeElement).toBe(cancel);
+    fireEvent.click(cancel); await screen.findByRole("alert");
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "发布作品" }));
+  });
+  it.each(["success", "error"] as const)("%s never steals focus after the user moves to another action", async (outcome) => {
+    const request = uploadRequest(); vi.mocked(api.upload).mockReturnValue(request.promise);
+    await mount(); fill(); render(<button>其他操作</button>);
+    const submit = screen.getByRole("button", { name: "发布作品" }); submit.focus(); fireEvent.click(submit);
+    const other = screen.getByRole("button", { name: "其他操作" }); other.focus();
+    await act(async () => outcome === "success" ? request.resolve(videoFixture(1)) : request.reject(new Error("上传失败")));
+    expect(document.activeElement).toBe(other);
+    if (outcome === "success") expect(screen.getByTestId("location").textContent).toBe("/video/1");
+    else expect(screen.getByRole("alert").textContent).toBe("上传失败");
   });
 });

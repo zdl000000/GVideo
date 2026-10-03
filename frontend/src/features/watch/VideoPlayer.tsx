@@ -147,7 +147,7 @@ export function VideoPlayer({ video, theaterMode, onTheaterModeChange }: { video
         fallbackToDirect();
         return;
       }
-      if (sourceMode === "fallback") setStreamStatus("failed");
+      setStreamStatus("failed");
     };
     const handleTimeUpdate = () => {
       setCurrentTime(element.currentTime);

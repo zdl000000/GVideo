@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Bookmark,
   Check,
@@ -32,19 +32,32 @@ export const notificationCopy = (item: Notification) => {
 };
 
 function NotificationRow({ item, busy, onRead }: { item: Notification; busy: number | "all" | null; onRead: (item: Notification) => Promise<void> }) {
+  const linkRef = useRef<HTMLAnchorElement>(null);
+  const readButtonRef = useRef<HTMLButtonElement>(null);
+  const readFocusRef = useRef(false);
   const copy = notificationCopy(item);
   const target = item.video_id ? `/video/${item.video_id}` : item.actor_id ? `/users/${item.actor_id}` : "/notifications";
   const marking = busy === item.id;
+  useEffect(() => {
+    if (!readFocusRef.current) return;
+    const active = document.activeElement;
+    if (active === document.body || active === readButtonRef.current || active === linkRef.current) {
+      // The read button is disabled while saving and removed after success.
+      // Keep its keyboard context on the same notification, including failures.
+      (item.read_at || marking ? linkRef.current : readButtonRef.current)?.focus();
+    }
+    if (!marking) readFocusRef.current = false;
+  }, [item.read_at, marking]);
   return (
     <article className={`gv-notification-row gv-notification-row--${item.type} ${item.read_at ? "read" : "unread"}`} aria-busy={marking}>
       <span className="gv-notification-icon" aria-hidden="true">{copy.icon}</span>
       <div className="gv-notification-copy">
         <div className="gv-notification-meta"><span>{copy.label}</span>{!item.read_at && <span className="gv-notification-unread"><i aria-hidden="true" />未读</span>}<time dateTime={item.created_at}>{formatDate(item.created_at)}</time></div>
-        <Link to={target} onClick={() => onRead(item)}>{copy.title}</Link>
+        <Link ref={linkRef} to={target} onClick={() => onRead(item)}>{copy.title}</Link>
         <p>{copy.detail}</p>
         {marking && <span className="gv-notification-read-status" role="status">正在标记已读</span>}
       </div>
-      {!item.read_at && <button type="button" className="gv-notification-read-button" onClick={() => onRead(item)} disabled={busy !== null} title="标记已读" aria-label="标记已读">{marking ? <LoaderCircle size={18} className="gv-notification-busy-icon" aria-hidden="true" /> : <Check size={18} aria-hidden="true" />}</button>}
+      {!item.read_at && <button ref={readButtonRef} type="button" className="gv-notification-read-button" onClick={() => { readFocusRef.current = document.activeElement === readButtonRef.current; void onRead(item); }} disabled={busy !== null} title="标记已读" aria-label="标记已读">{marking ? <LoaderCircle size={18} className="gv-notification-busy-icon" aria-hidden="true" /> : <Check size={18} aria-hidden="true" />}</button>}
     </article>
   );
 }
@@ -56,18 +69,34 @@ export function NotificationCenterPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState<number | "all" | null>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const allReadButtonRef = useRef<HTMLButtonElement>(null);
+  const allReadFocusRef = useRef(false);
 
-  const load = () => {
+  useEffect(() => {
+    if (!allReadFocusRef.current) return;
+    const active = document.activeElement;
+    if (active === document.body || active === allReadButtonRef.current || active === headingRef.current) {
+      (busy === "all" || result.unread_count === 0 ? headingRef.current : allReadButtonRef.current)?.focus();
+    }
+    if (busy !== "all") allReadFocusRef.current = false;
+  }, [busy, result.unread_count]);
+
+  const load = (signal: AbortSignal) => {
     setLoading(true);
     setError("");
     const query = new URLSearchParams({ page: String(page), page_size: "20" });
-    api.notifications(query)
-      .then(setResult)
-      .catch((err) => setError(errorMessage(err)))
-      .finally(() => setLoading(false));
+    api.notifications(query, signal)
+      .then((next) => { if (!signal.aborted) setResult(next); })
+      .catch((err) => { if (!signal.aborted) setError(errorMessage(err)); })
+      .finally(() => { if (!signal.aborted) setLoading(false); });
   };
 
-  useEffect(load, [page]);
+  useEffect(() => {
+    const controller = new AbortController();
+    load(controller.signal);
+    return () => controller.abort();
+  }, [page]);
 
   const markRead = async (item: Notification) => {
     if (item.read_at || busy) return;
@@ -89,6 +118,7 @@ export function NotificationCenterPage() {
 
   const markAll = async () => {
     if (!result.unread_count || busy) return;
+    allReadFocusRef.current = document.activeElement === allReadButtonRef.current;
     setBusy("all");
     try {
       await api.markAllNotificationsRead();
@@ -105,8 +135,8 @@ export function NotificationCenterPage() {
   return (
     <div className="page gv-notification-center">
       <section className="gv-notification-heading" aria-labelledby="notification-center-title">
-        <div><p className="eyebrow">WATCH / ACTIVITY</p><h1 id="notification-center-title">通知中心</h1><p className="gv-notification-count" aria-live="polite">{loading ? "正在读取通知动态" : result.unread_count ? `${result.unread_count} 条未读通知` : "所有通知都已读"}</p></div>
-        <button type="button" className="secondary-button" onClick={markAll} disabled={loading || !result.unread_count || busy !== null}>{busy === "all" ? <LoaderCircle size={17} className="gv-notification-busy-icon" aria-hidden="true" /> : <CheckCheck size={17} aria-hidden="true" />}{busy === "all" ? "正在标记全部已读" : "全部标记已读"}</button>
+        <div><p className="eyebrow">WATCH / ACTIVITY</p><h1 ref={headingRef} tabIndex={-1} id="notification-center-title">通知中心</h1><p className="gv-notification-count" aria-live="polite">{loading ? "正在读取通知动态" : result.unread_count ? `${result.unread_count} 条未读通知` : "所有通知都已读"}</p></div>
+        <button ref={allReadButtonRef} type="button" className="secondary-button" onClick={markAll} disabled={loading || !result.unread_count || busy !== null}>{busy === "all" ? <LoaderCircle size={17} className="gv-notification-busy-icon" aria-hidden="true" /> : <CheckCheck size={17} aria-hidden="true" />}{busy === "all" ? "正在标记全部已读" : "全部标记已读"}</button>
       </section>
       {error && <p className="inline-error" role="alert">{error}</p>}
       {loading ? <LoadingBlock label="正在读取通知" /> : result.items.length ? (

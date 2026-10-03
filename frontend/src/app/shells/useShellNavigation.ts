@@ -49,7 +49,10 @@ export function useShellNavigation({ auth, onLogout }: ShellProps): ShellNavigat
 
   useLayoutEffect(() => {
     if (!menuOpen || !isMobile || !drawerRef.current) {
-      if (wasMenuOpen.current) menuButtonRef.current?.focus();
+      if (wasMenuOpen.current) {
+        // Resizing to desktop hides the drawer trigger; keep focus in visible content.
+        (isMobile ? menuButtonRef.current ?? document.getElementById("main-content") : document.getElementById("main-content"))?.focus();
+      }
       wasMenuOpen.current = false;
       return;
     }

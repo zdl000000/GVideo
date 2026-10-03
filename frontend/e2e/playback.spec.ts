@@ -9,7 +9,8 @@ const viewer: User = { ...creator, id: 1, username: "验收账户", is_admin: fa
 // Only API responses are isolated. The player streams an existing local media asset;
 // these tests never register accounts, upload media or write to the real database.
 async function fixture(page: Page, options: { self?: boolean; anonymous?: boolean; empty?: boolean; video?: Partial<Video>; profile?: Partial<CreatorProfile> } = {}) {
-  const mediaResponse = await page.request.get('/api/v1/videos/56?count_view=false');
+  const mediaVideoId = process.env.E2E_MEDIA_VIDEO_ID || '56';
+  const mediaResponse = await page.request.get(`/api/v1/videos/${mediaVideoId}?count_view=false`);
   expect(mediaResponse.ok()).toBe(true);
   const media = (await mediaResponse.json()).data as Video;
   const profile = { ...creator, ...options.profile };
@@ -194,6 +195,10 @@ test('playback quality, speed and subtitle menus support keyboard focus and sele
     await trigger.click();
     const first = page.getByRole('group', { name: group, exact: true }).getByRole('button').first();
     await expect(first).toBeFocused();
+    await first.press('Tab'); await page.keyboard.press('Shift+Tab');
+    await expect(first).toBeFocused();
+    await expect(first).toHaveCSS('outline-width', '2px');
+    await expect(first).toHaveCSS('outline-color', 'rgb(255, 255, 255)');
     await first.press('Escape');
     await expect(trigger).toBeFocused();
     await expect(trigger).toHaveAttribute('aria-expanded', 'false');
@@ -317,7 +322,12 @@ test('playback fullscreen and picture-in-picture retain the same media element',
   if (capabilities.fullscreen) {
     await fullscreen.click();
     await expect.poll(() => page.evaluate(() => document.fullscreenElement === document.querySelector('.player-wrap'))).toBe(true);
-    await page.getByRole('button', { name: '退出全屏', exact: true }).click();
+    const exitFullscreen = page.getByRole('button', { name: '退出全屏', exact: true });
+    await exitFullscreen.press('Tab'); await page.keyboard.press('Shift+Tab');
+    await expect(exitFullscreen).toBeFocused();
+    await expect(exitFullscreen).toHaveCSS('outline-width', '2px');
+    await expect(exitFullscreen).toHaveCSS('outline-color', 'rgb(255, 255, 255)');
+    await exitFullscreen.click();
     await expect.poll(() => page.evaluate(() => document.fullscreenElement === null)).toBe(true);
   } else await expect(fullscreen).toBeDisabled();
   const pip = page.getByRole('button', { name: '画中画', exact: true });
@@ -328,4 +338,85 @@ test('playback fullscreen and picture-in-picture retain the same media element',
     await expect.poll(() => page.evaluate(() => document.pictureInPictureElement === null)).toBe(true);
   } else await expect(pip).toBeDisabled();
   expect(await handle!.evaluate((element) => element === document.querySelector('video'))).toBe(true);
+});
+
+test('Phase 6 direct playback restores and saves progress with real volume and mute controls', async ({ page }) => {
+  await fixture(page, { video: { hls_url: '' } });
+  await page.addInitScript(() => {
+    if (!sessionStorage.getItem('phase6-resume-seeded')) {
+      localStorage.setItem('gvideo-progress-1', '8');
+      sessionStorage.setItem('phase6-resume-seeded', 'true');
+    }
+  });
+  await page.goto('/video/1');
+  const media = page.locator('video');
+  await expect.poll(() => media.evaluate((element: HTMLVideoElement) => element.readyState)).toBeGreaterThanOrEqual(2);
+  await expect.poll(() => media.evaluate((element: HTMLVideoElement) => element.currentTime)).toBeCloseTo(8, 0);
+  await expect(page.locator('.resume-notice')).toContainText('继续播放');
+  const player = page.getByRole('region', { name: /视频播放器$/ });
+  await player.focus();
+  await player.press('ArrowDown');
+  expect(await media.evaluate((element: HTMLVideoElement) => element.volume)).toBeCloseTo(0.95, 2);
+  await player.press('m');
+  await expect(page.getByRole('button', { name: '取消静音', exact: true })).toBeVisible();
+  expect(await media.evaluate((element: HTMLVideoElement) => element.muted)).toBe(true);
+  await page.getByRole('button', { name: '取消静音', exact: true }).click();
+  await media.evaluate((element: HTMLVideoElement) => { element.currentTime = 9; });
+  await page.getByRole('button', { name: '播放', exact: true }).click();
+  await expect.poll(() => media.evaluate((element: HTMLVideoElement) => element.currentTime)).toBeGreaterThan(9);
+  await page.getByRole('button', { name: '暂停', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => Number(localStorage.getItem('gvideo-progress-1')))).toBeGreaterThanOrEqual(9);
+  await page.reload();
+  await expect.poll(() => media.evaluate((element: HTMLVideoElement) => element.readyState)).toBeGreaterThanOrEqual(2);
+  await expect.poll(() => media.evaluate((element: HTMLVideoElement) => element.currentTime)).toBeGreaterThanOrEqual(9);
+  await page.getByRole('button', { name: '从头播放', exact: true }).click();
+  await expect.poll(() => media.evaluate((element: HTMLVideoElement) => element.currentTime)).toBe(0);
+});
+
+test('Phase 6 real HLS failure falls back to the existing MP4 and failed fallback offers retry', async ({ page }) => {
+  await fixture(page, { video: { hls_url: '/phase6-invalid-stream.m3u8' } });
+  await page.route('**/phase6-invalid-stream.m3u8', (route) => route.fulfill({ contentType: 'application/vnd.apple.mpegurl', body: 'invalid manifest' }));
+  await page.goto('/video/1');
+  await expect(page.locator('.stream-status')).toContainText('已切换原始视频', { timeout: 30_000 });
+  const media = page.locator('video');
+  await expect.poll(() => media.evaluate((element: HTMLVideoElement) => element.readyState)).toBeGreaterThanOrEqual(2);
+  expect(await media.evaluate((element: HTMLVideoElement) => element.currentSrc)).toContain('.mp4');
+  await media.evaluate((element) => element.dispatchEvent(new Event('error')));
+  await expect(page.getByRole('button', { name: '重试播放', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '重试播放', exact: true }).click();
+  await expect(page.locator('.stream-status')).toContainText('已切换原始视频', { timeout: 30_000 });
+  await expect.poll(() => media.evaluate((element: HTMLVideoElement) => element.readyState)).toBeGreaterThanOrEqual(2);
+});
+
+test('Phase 6 failed direct media has visible recovery instead of an empty player', async ({ page }) => {
+  await fixture(page, { video: { hls_url: '', video_url: '/phase6-missing-direct.mp4' } });
+  await page.route('**/phase6-missing-direct.mp4', (route) => route.fulfill({ status: 404, body: '' }));
+  await page.goto('/video/1');
+  await expect.poll(() => page.locator('video').evaluate((element: HTMLVideoElement) => element.error?.code)).toBeGreaterThan(0);
+  await expect(page.locator('.stream-status')).toContainText('视频加载失败，请重试');
+  await expect(page.getByRole('button', { name: '重试播放', exact: true })).toBeVisible();
+});
+
+test('Phase 6 HLS quality selects an actual level and sharing preserves copy/cancel semantics', async ({ page }) => {
+  await fixture(page);
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'share', { configurable: true, value: undefined });
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (value: string) => { sessionStorage.setItem('phase6-shared-url', value); } } });
+  });
+  await page.goto('/video/1');
+  const trigger = page.getByRole('button', { name: /选择视频清晰度，当前/ });
+  await trigger.click();
+  const group = page.getByRole('group', { name: '选择视频清晰度', exact: true });
+  const resolution = group.getByRole('button', { name: /^\d+p$/ }).first();
+  await expect(resolution).toBeVisible();
+  const label = await resolution.textContent();
+  await resolution.press('Enter');
+  await expect(trigger).toHaveAttribute('aria-label', `选择视频清晰度，当前${label}`);
+  await expect(trigger).toBeFocused();
+  await page.getByRole('button', { name: '分享', exact: true }).click();
+  await expect(page.locator('.share-feedback')).toHaveText('链接已复制');
+  expect(await page.evaluate(() => sessionStorage.getItem('phase6-shared-url'))).toBe(page.url());
+  await page.evaluate(() => Object.defineProperty(navigator, 'share', { configurable: true, value: () => Promise.reject(new DOMException('cancel', 'AbortError')) }));
+  await page.getByRole('button', { name: '分享', exact: true }).click();
+  await expect(page.locator('.inline-error')).toHaveCount(0);
 });

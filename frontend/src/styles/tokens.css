@@ -109,10 +109,11 @@
   --gv-line: rgba(17, 24, 39, .09);
   --gv-line-strong: rgba(17, 24, 39, .24);
   --gv-text: #111318;
-  --gv-text-2: #5d6674;
-  --gv-text-3: #626d7d;
+  /* Foregrounds also meet 4.5:1 on WATCH / Studio warm secondary surfaces. */
+  --gv-text-2: #596270;
+  --gv-text-3: #5d6472;
   --gv-brand-text: #b90e39;
-  --gv-cyan-text: #087777;
+  --gv-cyan-text: #066969;
   --gv-success-text: #16743b;
   --gv-warning-text: #855500;
   --gv-danger-text: #b42323;

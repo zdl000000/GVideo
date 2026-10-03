@@ -4,6 +4,16 @@
 
 ## 当前范围
 
+Phase 5 已通过 PR #42 squash merge 到 main `af48544`，本地 main、origin/main 与 GitHub main 已同步。Phase 6 从干净的该基线创建 `codex/gvideo3-final-qa`，只做明确缺陷修复与最终验收，默认保持 light；不 commit、不 push、不创建 PR、不发布。
+
+Phase 6 工程验收完成，等待用户最终确认 Release Candidate；不继续开发或自行发布。已修主要token对比度、focus/busy/隐藏文件控件、mobile 44px目标、hover/reduced-motion、通知读取取消与迟到响应、direct媒体错误反馈及生产CSP品牌资源内联问题。默认light、后端/API/依赖、已验收页面结构保持；完整范围及限制见 `docs/gvideo3-phase6-acceptance.md`。
+
+最终 typecheck、21文件/252项unit、build/HLS budget通过。SAFE为87 passed/3 skipped，Phase1–5完整回归128 passed/8 skipped，真实开发环境只读回归48 passed，headers12 passed；17spec/240case完整isolated E2E最终229 passed/11 skipped/0 failed（6.2m），包含独立数据库注册、真实上传、通知及社交/评论创建删除。scripts/check.ps1与最终git diff --check均exit0；HTTPS/TLS文件未设置按规则跳过，WebKit/native HLS/实体手机未实测，其他限制详见报告。
+
+完整E2E使用独立Compose项目、数据库和媒体卷，原开发数据仅运行已分类只读子集。16张最终截图已实际视觉审阅；截图、测试日志、临时环境配置均留在忽略的tmp/，未清理容器或卷。当前HEAD仍为af48544，Phase6正式41文件未提交，暂存区为空。以下保留Phase5发布前的历史验收记录。
+
+## Phase 5 历史验收与发布
+
 Phase 5 — PUBLISH / AUTH / NOTIFICATIONS / ADMIN 已由用户通过最终工程与视觉验收，作为稳定检查点封版，不再继续 Phase 5 调整。基线为 Phase 4 经 PR #41 squash merge 的 main `0642b13`，工作分支 `codex/gvideo3-publish-auth-activity-governance`。范围仅 /upload、/auth、/notifications、/admin/reports 与四份 scoped CSS、必要测试、规范和验收报告，没有 Phase 6 内容。
 
 用户已授权为 Phase 5 创建独立提交、推送分支并创建 PR；须等待 Frontend、Backend、Backend Race 全部通过后 squash merge 到 main，再同步本地 main、origin/main 与 GitHub main。发布状态以 Git 和 GitHub 实际记录为准，完成后停止，不进入 Phase 6。提交仅保留源码、正式测试、设计规范和验收报告；tmp/、截图、Playwright artifacts、一次性预览、日志、敏感文件和构建产物排除。

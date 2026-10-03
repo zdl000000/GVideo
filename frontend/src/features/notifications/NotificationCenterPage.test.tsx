@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { MemoryRouter, useLocation } from "react-router-dom";
+import { Link, MemoryRouter, useLocation } from "react-router-dom";
 import { api } from "../../shared/api/client";
 import type { Notification, NotificationPage } from "../../types";
 import { NotificationCenterPage, notificationCopy } from "./NotificationCenterPage";
@@ -91,6 +91,38 @@ describe("NotificationCenterPage", () => {
     expect(api.markNotificationRead).toHaveBeenCalledOnce(); expect(screen.getByLabelText("当前路径").textContent).toBe("/users/9");
   });
 
+  it("键盘标记单条通知时busy与按钮卸载后焦点留在同一通知", async () => {
+    const pending = deferred<{ read: boolean }>(); vi.mocked(api.markNotificationRead).mockReturnValue(pending.promise);
+    mount(); const button = await screen.findByRole("button", { name: "标记已读" });
+    const target = screen.getByRole("link", { name: "创作者小李 点赞了《测试视频》" });
+    button.focus(); fireEvent.click(button);
+    expect(document.activeElement).toBe(target);
+    await act(async () => pending.resolve({ read: true }));
+    expect(screen.queryByRole("button", { name: "标记已读" })).toBeNull();
+    expect(document.activeElement).toBe(target);
+  });
+
+  it("单条已读失败恢复原操作按钮焦点", async () => {
+    let reject!: (error: Error) => void;
+    vi.mocked(api.markNotificationRead).mockReturnValue(new Promise((_, fail) => { reject = fail; }));
+    mount(); const button = await screen.findByRole("button", { name: "标记已读" });
+    button.focus(); fireEvent.click(button);
+    await act(async () => reject(new Error("隔离焦点错误")));
+    expect(screen.getByRole("alert").textContent).toBe("隔离焦点错误");
+    expect(document.activeElement).toBe(button);
+  });
+
+  it("标记期间用户移到其他通知后不抢回焦点", async () => {
+    const pending = deferred<{ read: boolean }>(); vi.mocked(api.markNotificationRead).mockReturnValue(pending.promise);
+    vi.mocked(api.notifications).mockResolvedValue(data([item(1), item(2, { type: "follow", video_id: undefined })]));
+    mount(); await screen.findByText("2 条未读通知");
+    const button = screen.getAllByRole("button", { name: "标记已读" })[0];
+    button.focus(); fireEvent.click(button);
+    const nextTarget = screen.getByRole("link", { name: "创作者小李 关注了你" }); nextTarget.focus();
+    await act(async () => pending.resolve({ read: true }));
+    expect(document.activeElement).toBe(nextTarget);
+  });
+
   it("全部标记期间可见busy，完成后所有当前条目已读且同步全局事件", async () => {
     const pending = deferred<{ read: boolean }>(); vi.mocked(api.markAllNotificationsRead).mockReturnValue(pending.promise);
     const changed = vi.fn(); window.addEventListener("gvideo-notifications-changed", changed);
@@ -102,6 +134,32 @@ describe("NotificationCenterPage", () => {
     expect(api.markAllNotificationsRead).toHaveBeenCalledOnce(); expect(changed).toHaveBeenCalledOnce();
     expect(screen.queryAllByText("未读")).toHaveLength(0); expect(screen.getByText("所有通知都已读")).toBeTruthy();
     window.removeEventListener("gvideo-notifications-changed", changed);
+  });
+
+  it("键盘全部标记busy和成功后留在通知标题，禁用按钮不将focus丢到body", async () => {
+    const pending = deferred<{ read: boolean }>(); vi.mocked(api.markAllNotificationsRead).mockReturnValue(pending.promise);
+    mount(); await screen.findByText("1 条未读通知");
+    const button = screen.getByRole("button", { name: "全部标记已读" }); button.focus(); fireEvent.click(button);
+    const heading = screen.getByRole("heading", { name: "通知中心" }); expect(document.activeElement).toBe(heading);
+    await act(async () => pending.resolve({ read: true }));
+    expect(document.activeElement).toBe(heading); expect((button as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("键盘全部标记失败恢复原按钮，保留未读状态", async () => {
+    let reject!: (error: Error) => void;
+    vi.mocked(api.markAllNotificationsRead).mockReturnValue(new Promise((_, fail) => { reject = fail; }));
+    mount(); await screen.findByText("1 条未读通知");
+    const button = screen.getByRole("button", { name: "全部标记已读" }); button.focus(); fireEvent.click(button);
+    await act(async () => reject(new Error("隔离全部已读失败")));
+    expect(document.activeElement).toBe(button); expect(screen.getByText("1 条未读通知")).toBeTruthy();
+  });
+
+  it("全部标记期间用户移到通知链接后不抢回focus", async () => {
+    const pending = deferred<{ read: boolean }>(); vi.mocked(api.markAllNotificationsRead).mockReturnValue(pending.promise);
+    mount(); await screen.findByText("1 条未读通知");
+    const button = screen.getByRole("button", { name: "全部标记已读" }); button.focus(); fireEvent.click(button);
+    const link = screen.getByRole("link", { name: "创作者小李 点赞了《测试视频》" }); link.focus();
+    await act(async () => pending.resolve({ read: true })); expect(document.activeElement).toBe(link);
   });
 
   it.each(["one", "all"] as const)("%s 标记失败保留未读并显示错误", async (operation) => {
@@ -130,5 +188,23 @@ describe("NotificationCenterPage", () => {
     vi.mocked(api.notifications).mockResolvedValue(data([notification])); mount();
     const link = await screen.findByRole("link", { name: notificationCopy(notification).title });
     expect(link.getAttribute("href")).toBe("/notifications"); expect(screen.getByText(comment)).toBeTruthy();
+  });
+
+  it("浏览器返回第一页后迟到的第二页响应不能覆盖当前通知", async () => {
+    const late = deferred<NotificationPage>();
+    vi.mocked(api.notifications).mockImplementation(async (params) => params?.get("page") === "2" ? late.promise : data([item(1, { video_title: "当前第一页" })]));
+    render(<MemoryRouter initialEntries={["/notifications?page=2"]}><NotificationCenterPage /><Link to="/notifications">返回第一页</Link></MemoryRouter>);
+    fireEvent.click(screen.getByRole("link", { name: "返回第一页" }));
+    await screen.findByRole("link", { name: "创作者小李 点赞了《当前第一页》" });
+    await act(async () => late.resolve(data([item(2, { video_title: "迟到第二页" })], { page: 2 })));
+    expect(screen.queryByRole("link", { name: "创作者小李 点赞了《当前第一页》" })).not.toBeNull();
+    expect(screen.queryByRole("link", { name: "创作者小李 点赞了《迟到第二页》" })).toBeNull();
+  });
+
+  it("卸载通知页时取消正在读取的请求", async () => {
+    const late = deferred<NotificationPage>(); vi.mocked(api.notifications).mockReturnValue(late.promise);
+    const view = mount(); const signal = vi.mocked(api.notifications).mock.calls[0][1]; view.unmount();
+    expect(signal?.aborted).toBe(true);
+    await act(async () => late.resolve(data()));
   });
 });

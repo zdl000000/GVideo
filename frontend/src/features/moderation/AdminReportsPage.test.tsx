@@ -172,4 +172,22 @@ describe("AdminReportsPage", () => {
     const query = vi.mocked(api.adminReports).mock.calls[1][0];
     expect(query?.get("status")).toBe("reviewed"); expect(query?.get("page")).toBe("2"); expect(query?.get("page_size")).toBe("20");
   });
+  it.each(["success", "error"] as const)("focused governance action retains its row context during busy and %s", async (outcome) => {
+    const request = deferred<VideoReport>(); vi.mocked(api.reviewReport).mockReturnValue(request.promise);
+    mount(); const row = await screen.findByRole("article");
+    const trigger = within(actions()).getByRole("button", { name: "处理完成" }); trigger.focus(); fireEvent.click(trigger);
+    const title = within(row).getByRole("link", { name: "测试视频" });
+    expect(document.activeElement).toBe(title); expect(row.getAttribute("aria-busy")).toBe("true");
+    await act(async () => outcome === "success" ? request.resolve(report({ status: "resolved" })) : request.reject(new Error("审核失败")));
+    expect(document.activeElement).toBe(title); expect(row.getAttribute("aria-busy")).toBe("false");
+    expect(row.getAttribute("data-status")).toBe(outcome === "success" ? "resolved" : "pending");
+  });
+  it.each(["success", "error"] as const)("governance %s does not steal focus from another control", async (outcome) => {
+    const request = deferred<VideoReport>(); vi.mocked(api.reviewReport).mockReturnValue(request.promise);
+    mount(); await screen.findByRole("article");
+    const trigger = within(actions()).getByRole("button", { name: "处理完成" }); trigger.focus(); fireEvent.click(trigger);
+    const other = within(screen.getByRole("group", { name: "举报状态筛选" })).getByRole("button", { name: "全部" }); other.focus();
+    await act(async () => outcome === "success" ? request.resolve(report({ status: "resolved" })) : request.reject(new Error("审核失败")));
+    expect(document.activeElement).toBe(other);
+  });
 });

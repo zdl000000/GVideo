@@ -19,13 +19,13 @@ function uniqueUsername(prefix: string) {
 async function register(page: Page, username: string) {
   await page.goto("/auth");
   await expect(page.locator(".auth-form-wrap form")).toBeVisible({ timeout: 20_000 });
-  await page.locator(".segmented-control").getByRole("button", { name: "注册" }).click();
+  await page.locator(".gv-auth-mode").getByRole("button", { name: "注册" }).click();
   await page.getByLabel("用户名").fill(username);
   await page.getByLabel("密码").fill(PASSWORD);
   await page.locator(".stack-form").getByRole("button", { name: "创建账号" }).click();
   await page.waitForURL((url) => !url.pathname.startsWith("/auth"), { timeout: 20_000 });
-  // 登录态成立：顶栏出现退出登录按钮（桌面顶栏或移动侧栏，任一即可）
-  await expect(page.locator('button[title="退出登录"]').first()).toBeAttached({ timeout: 15_000 });
+  // 登录态成立：账户身份已加载（桌面菜单或移动抽屉中的同一用户名）。
+  await expect(page.locator(".user-chip").first()).toBeAttached({ timeout: 15_000 });
   await expect.poll(() => page.locator(".user-chip").first().textContent(), { timeout: 15_000 }).toContain(username);
 }
 
@@ -37,7 +37,8 @@ test("registered user publishes a comment and empty comments are rejected", asyn
   // 从首页打开第一个视频卡片。前置条件：本用例依赖环境中已有至少一个
   // 公开视频（开发/验收库由验收脚本播种；纯净环境请先上传或改为自建视频）。
   await page.goto("/");
-  const firstCard = page.locator(".cover-link").first();
+  // A one-video environment renders the only work as the Home hero.
+  const firstCard = page.locator(".gv-hero-copy .gv-button, .cover-link").first();
   await expect(firstCard).toBeVisible({ timeout: 20_000 });
   await firstCard.click();
   await expect(page).toHaveURL(/\/video\/\d+$/);

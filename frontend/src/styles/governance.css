@@ -26,7 +26,11 @@
 .gv-governance-page .gv-governance-filter-bar { display: flex; align-items: center; justify-content: space-between; gap: 24px; min-width: 0; padding-block: 12px; border-block: 1px solid var(--gv-line); }
 .gv-governance-page .gv-governance-filters { display: flex; gap: 6px; min-width: 0; overflow-x: auto; scrollbar-width: thin; padding-block: 3px; }
 .gv-governance-page .gv-governance-filters button { flex: 0 0 auto; min-height: 44px; padding: 0 16px; color: var(--gv-text-2); background: transparent; border: 1px solid transparent; border-radius: 5px; font-size: 12px; }
-.gv-governance-page .gv-governance-filters button:hover { color: var(--gv-text); background: var(--gv-surface); }
+@media (hover: hover) and (pointer: fine) {
+  .gv-governance-page .gv-governance-filters button:hover { color: var(--gv-text); background: var(--gv-surface); }
+  .gv-governance-page .gv-report-content h2 a:hover, .gv-governance-page .gv-report-people a:hover { color: var(--gv-cyan-text); }
+  .gv-governance-page .gv-report-actions button:hover:not(:disabled) { background: var(--gv-surface-2); color: var(--gv-text); }
+}
 .gv-governance-page .gv-governance-filters button.active { border-color: var(--gv-line-strong); background: var(--gv-surface); color: var(--gv-text); font-weight: 650; }
 .gv-governance-page .gv-governance-filter-note { flex: 0 0 auto; color: var(--gv-text-3); font-size: 10px; }
 .gv-governance-page .gv-governance-columns, .gv-governance-page .gv-report-row { display: grid; grid-template-columns: 100px minmax(0, 1fr) 112px; gap: 24px; }
@@ -44,7 +48,6 @@
 .gv-governance-page .gv-report-content { min-width: 0; }
 .gv-governance-page .gv-report-content h2 { margin: 0; font-size: 15px; line-height: 1.6; font-weight: 650; overflow-wrap: anywhere; }
 .gv-governance-page .gv-report-content h2 a { color: var(--gv-text); }
-.gv-governance-page .gv-report-content h2 a:hover { color: var(--gv-cyan-text); }
 .gv-governance-page .gv-report-reason { display: flex; align-items: baseline; gap: 6px; margin: 9px 0; color: var(--gv-brand-text); font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
 .gv-governance-page .gv-report-reason svg { flex: 0 0 auto; align-self: center; }
 .gv-governance-page .gv-report-reason span { min-width: 0; }
@@ -53,12 +56,10 @@
 .gv-governance-page .gv-report-people, .gv-governance-page .gv-report-dates { display: flex; flex-wrap: wrap; gap: 6px 20px; color: var(--gv-text-3); font-size: 10px; line-height: 1.8; }
 .gv-governance-page .gv-report-people > span, .gv-governance-page .gv-report-dates > span { min-width: 0; overflow-wrap: anywhere; }
 .gv-governance-page .gv-report-people a { color: var(--gv-text-2); font-weight: 600; }
-.gv-governance-page .gv-report-people a:hover { color: var(--gv-cyan-text); }
 .gv-governance-page .gv-report-dates { margin-top: 5px; font-variant-numeric: tabular-nums; }
 .gv-governance-page .gv-report-dates time { font-family: var(--gv-font-mono); }
 .gv-governance-page .gv-report-actions { display: grid; gap: 7px; min-width: 0; }
 .gv-governance-page .gv-report-actions button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; padding: 0 10px; border: 1px solid var(--gv-line-strong); border-radius: 5px; color: var(--gv-text-2); background: var(--gv-surface); font-size: 11px; }
-.gv-governance-page .gv-report-actions button:hover:not(:disabled) { background: var(--gv-surface-2); color: var(--gv-text); }
 .gv-governance-page .gv-report-actions button:disabled { opacity: .45; cursor: not-allowed; }
 .gv-governance-page .gv-report-actions button.gv-report-dismiss { color: var(--gv-text-3); background: transparent; border-color: var(--gv-line); }
 .gv-governance-page .gv-report-busy { color: var(--gv-text-3); font-size: 10px; line-height: 1.7; }

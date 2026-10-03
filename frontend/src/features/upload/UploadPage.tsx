@@ -14,6 +14,9 @@ export function UploadPage() {
   const videoRef = useRef<HTMLInputElement>(null);
   const coverRef = useRef<HTMLInputElement>(null);
   const subtitleRef = useRef<HTMLInputElement>(null);
+  const submitControlsRef = useRef<HTMLDivElement>(null);
+  const uploadControlsRef = useRef<HTMLDivElement>(null);
+  const uploadFocusRef = useRef<Element | null>(null);
   const [categories, setCategories] = useState<string[]>([]);
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [coverFile, setCoverFile] = useState<File | null>(null);
@@ -40,10 +43,23 @@ export function UploadPage() {
     return () => window.removeEventListener("beforeunload", warn);
   }, [busy]);
   useEffect(() => () => uploadControllerRef.current?.abort(), []);
+  useEffect(() => {
+    if (!uploadFocusRef.current) return;
+    const active = document.activeElement;
+    const submitButton = submitControlsRef.current?.querySelector("button");
+    const cancelButton = uploadControlsRef.current?.querySelector("button");
+    if (busy) {
+      if (active === document.body || (active === uploadFocusRef.current && active?.matches(":disabled"))) cancelButton?.focus();
+    } else {
+      if (active === document.body || active === cancelButton) submitButton?.focus();
+      uploadFocusRef.current = null;
+    }
+  }, [busy]);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (!videoFile) { setError("请选择视频文件"); return; }
+    uploadFocusRef.current = event.currentTarget.contains(document.activeElement) ? document.activeElement : null;
     setBusy(true); setUploadProgress(0); setError("");
     const controller = new AbortController();
     uploadControllerRef.current = controller;
@@ -55,6 +71,7 @@ export function UploadPage() {
       const created = await api.upload(form, (loaded, total) => {
         setUploadProgress(total > 0 ? Math.round((loaded / total) * 100) : null);
       }, controller.signal);
+      uploadFocusRef.current = null;
       navigate(`/video/${created.id}`);
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") setError("上传已取消，文件和表单内容已保留");
@@ -121,13 +138,13 @@ export function UploadPage() {
           <header><span className="gv-publish-number">06</span><p>PUBLISH</p><h2 id="publish-submit-heading">准备发布</h2></header>
           <div className="gv-publish-section-body">
             {error && <p className="inline-error" role="alert">{error}</p>}
-            {busy && <div className="gv-publish-progress" role="status" aria-live="polite">
+            {busy && <div ref={uploadControlsRef} className="gv-publish-progress" role="status" aria-live="polite">
               <div className="gv-publish-progress-copy"><span>正在上传文件</span><strong>{uploadProgress === null ? "计算中" : `${uploadProgress}%`}</strong></div>
               <div className="gv-publish-progress-track" role="progressbar" aria-label="文件上传进度" aria-valuemin={0} aria-valuemax={100} aria-valuenow={uploadProgress ?? undefined} aria-valuetext={uploadProgress === null ? "上传大小未知" : `${uploadProgress}%`}><span style={{ width: `${uploadProgress ?? 0}%` }} /></div>
               <p>上传完成后会进入后台处理阶段</p>
               <Button variant="secondary" onClick={cancelUpload}>取消上传</Button>
             </div>}
-            <div className="gv-publish-submit"><p>文件与作品信息将一并提交。<br /><span>上传期间请保持此页面打开。</span></p><Button type="submit" disabled={busy || !videoFile}>{busy ? "正在上传..." : "发布作品"}<ArrowUpRight size={17} /></Button></div>
+            <div ref={submitControlsRef} className="gv-publish-submit"><p>文件与作品信息将一并提交。<br /><span>上传期间请保持此页面打开。</span></p><Button type="submit" disabled={busy || !videoFile}>{busy ? "正在上传..." : "发布作品"}<ArrowUpRight size={17} /></Button></div>
           </div>
         </section>
       </form>

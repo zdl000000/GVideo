@@ -324,6 +324,15 @@ describe("VideoPlayer HLS lifecycle", () => {
     expect(await screen.findByRole("button", { name: "重试播放" })).toBeTruthy();
   });
 
+  it("直接媒体加载失败时同样播报错误并提供既有重试", async () => {
+    renderPlayer({ ...hlsVideo, hls_url: "" });
+    fireEvent.error(document.querySelector("video") as HTMLVideoElement);
+    expect(await screen.findByText("视频加载失败，请重试")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "重试播放" }));
+    expect(screen.queryByText("视频加载失败，请重试")).toBeNull();
+    expect(document.querySelector("video")?.getAttribute("src")).toBe(hlsVideo.video_url);
+  });
+
   it("原生 HLS 请求在卸载时中止且不更新状态", async () => {
     vi.restoreAllMocks();
     vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockReturnValue("probably");

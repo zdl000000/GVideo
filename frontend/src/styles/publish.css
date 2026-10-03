@@ -19,7 +19,9 @@
 .gv-publish-section h2 { margin: 0; font-size: 14px; font-weight: 650; line-height: 1.5; }
 .gv-publish-section-body { min-width: 0; }
 .gv-publish-file { width: 100%; display: flex; align-items: center; gap: 20px; padding: 26px; min-height: 128px; border: 1px dashed var(--gv-line-strong); border-radius: 8px; color: var(--gv-text); background: var(--gv-surface); text-align: left; }
-.gv-publish-file:hover:not(:disabled) { border-color: var(--gv-brand-text); }
+@media (hover: hover) and (pointer: fine) {
+  .gv-publish-file:hover:not(:disabled) { border-color: var(--gv-brand-text); }
+}
 .gv-publish-file-icon { flex-shrink: 0; width: 58px; height: 58px; display: grid; place-items: center; color: var(--gv-brand-text); background: var(--gv-brand-soft); border-radius: 50%; }
 .gv-publish-file-copy { min-width: 0; flex: 1; }
 .gv-publish-file-copy strong { display: block; font-size: 17px; line-height: 1.7; overflow-wrap: anywhere; }

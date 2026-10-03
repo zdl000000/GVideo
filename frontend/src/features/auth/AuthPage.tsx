@@ -1,4 +1,4 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../../shared/api/client";
 import { errorMessage } from "../../shared/lib/errors";
@@ -27,10 +27,24 @@ export function AuthPage({ onAuth }: { onAuth: (payload: AuthPayload) => void })
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
+  const submittingControlRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    const form = formRef.current, control = submittingControlRef.current;
+    if (!form || !control) return;
+    if (busy) {
+      if (document.activeElement === document.body || form.contains(document.activeElement)) form.focus();
+    } else {
+      if (document.activeElement === form) control.focus();
+      submittingControlRef.current = null;
+    }
+  }, [busy]);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (busy) return;
+    submittingControlRef.current = formRef.current?.contains(document.activeElement) ? document.activeElement as HTMLElement : null;
     setBusy(true); setError("");
     try {
       const payload = mode === "login" ? await api.login(username, password) : await api.register(username, password);
@@ -57,7 +71,7 @@ export function AuthPage({ onAuth }: { onAuth: (payload: AuthPayload) => void })
           <Button variant="ghost" className={mode === "login" ? "active" : ""} aria-pressed={mode === "login"} disabled={busy} onClick={() => setMode("login")}>登录</Button>
           <Button variant="ghost" className={mode === "register" ? "active" : ""} aria-pressed={mode === "register"} disabled={busy} onClick={() => setMode("register")}>注册</Button>
         </div>
-        <form className="stack-form gv-auth-form" onSubmit={submit} aria-busy={busy} aria-labelledby="auth-form-title">
+        <form ref={formRef} tabIndex={-1} className="stack-form gv-auth-form" onSubmit={submit} aria-busy={busy} aria-labelledby="auth-form-title">
           <label htmlFor="auth-username">用户名<input id="auth-username" name="username" value={username} onChange={(event) => setUsername(event.target.value)} minLength={3} maxLength={24} autoComplete="username" autoCapitalize="none" spellCheck={false} placeholder="3-24 位中文、字母或数字" disabled={busy} required /></label>
           <label htmlFor="auth-password">密码<input id="auth-password" name="password" value={password} onChange={(event) => setPassword(event.target.value)} type="password" minLength={8} maxLength={72} autoComplete={mode === "login" ? "current-password" : "new-password"} placeholder="至少 8 位" disabled={busy} required /></label>
           {error && <p className="inline-error gv-auth-error" role="alert">{error}</p>}

@@ -48,7 +48,7 @@ export function EditVideoDialog({ video, categories, onClose, onSaved }: { video
             <div className="gv-edit-media"><VideoCover src={coverPreview} eager /></div>
             <span><ImagePlus size={16} />{cover ? "已选择新封面" : "替换封面"}</span>
           </button>
-          <input ref={coverRef} className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setCover(event.target.files?.[0] || null)} />
+          <input ref={coverRef} className="sr-only" type="file" tabIndex={-1} accept="image/jpeg,image/png,image/webp" onChange={(event) => setCover(event.target.files?.[0] || null)} />
           <div className="stack-form edit-video-fields">
             <label>标题<input value={title} onChange={(event) => setTitle(event.target.value)} minLength={2} maxLength={80} required /><span className="field-count">{title.length}/80</span></label>
             <label>分区<select value={category} onChange={(event) => setCategory(event.target.value)} required>{(categories.length ? categories : [video.category]).map((item) => <option key={item}>{item}</option>)}</select></label>
