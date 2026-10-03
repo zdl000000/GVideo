@@ -114,6 +114,8 @@ docker compose up --build -d
 
 ## 免费公网测试
 
+**此节为历史公网测试操作方式，不代表 UI RC 已完成生产部署或 HTTPS/TLS 实测。** `start-public-test.ps1` 会启动或复用仓库根 Compose 并临时修改其运行配置；Quick Tunnel 不会隔离数据。下方完整验收会注册、上传和修改持久数据，只有确认其底层数据库与媒体卷为专用演示/验收数据后才能执行，禁止用原开发库或生产库。隔离要求及当前 E2E 门禁见 [运维验收说明](operations.md#完整验收)。
+
 安装 `cloudflared` 后，可以用 Cloudflare Quick Tunnel 临时公开本机 Docker 站点：
 
 ```powershell

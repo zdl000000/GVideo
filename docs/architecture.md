@@ -31,12 +31,15 @@ Feature-first 是代码组织方式，不等于微服务。GVideo 在出现真�
 ```text
 frontend/src/
   app/App.tsx
+  app/shells/           WATCH、STUDIO、Auth 外壳与导航
   features/             按 auth、watch、videos、creator 等能力组织
   shared/api/
   shared/components/
+  shared/ui/
   shared/lib/
   types.ts
   styles.css
+  styles/               主题令牌与按界面范围组织的样式
 
 backend/internal/
   httpapi/
@@ -45,9 +48,10 @@ backend/internal/
   domain/
   media/
   platform/
+  modules/              moderation、notifications、comments、interactions
 ```
 
-后端当前仍使用技术分层，前端已经开始低风险迁移。现阶段不为了目录形式强行移动高风险媒体、认证和数据库代码。
+前端已按 Feature-first 组织，GVideo 3.0 Phase 1–6 UI RC 已验收（`e2c3a63`，PR #43）。后端已有四个纵向模块，其他业务保留现有技术分层；媒体、认证和数据库契约保持兼容。下方目标目录是未来按需迁移的边界参考，不表示所有示例文件都已存在。
 
 ## 目标前端结构
 
@@ -141,7 +145,7 @@ cmd/server -> modules -> shared/platform
 
 - 应用组合位于 `frontend/src/app/App.tsx`，页面按功能拆入 `frontend/src/features/`。
 - HTTP 客户端位于 `frontend/src/shared/api/client.ts`，通用组件和工具位于 `shared/`。
-- 视频举报与审核已作为首个纵向切片迁入 `internal/modules/moderation`，模块内拥有 Handler、Service、Repository 与聚焦测试；HTTP envelope、request ID、认证和 CSRF 仍由 `internal/httpapi` 统一控制。
+- 视频举报与审核、通知、评论及互动分别位于 `internal/modules/moderation`、`notifications`、`comments` 与 `interactions`，模块内拥有 Handler、Service、Repository 与聚焦测试；HTTP envelope、request ID、认证和 CSRF 仍由 `internal/httpapi` 统一控制。
 - 其余 Handler、Service、Repository 仍在现有 Go 包内按职责拆分，按低风险纵向切片逐步迁移。
 - 字幕管理入口和位置保持不变，仍只属于 `/me/videos` 投稿管理。
 - 指标、pprof 使用独立且默认关闭的管理监听端口；SQLite 使用迁移账本记录版本和校验和。

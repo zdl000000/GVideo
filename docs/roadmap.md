@@ -2,9 +2,11 @@
 
 本文记录 GVideo 的公开开发方向。具体实现范围以对应 Issue 和 Pull Request 为准，优先保证现有功能、数据与部署契约稳定。
 
-## 当前阶段：v1.0.0 发布与维护
+## 当前阶段：GVideo 3.0 UI Release Candidate 与维护
 
-- 发布打包：演示资产、[工程案例](case-study.md)、v1.0.0 tag 与 release notes。
+- Phase 1–6 已完成工程与视觉验收，Phase 6 经 PR #43 合并，UI RC 基线为 `e2c3a63`；默认主题正式保持 Light。不需要 Phase 6.1，当前只做文档与展示素材收尾。
+- 当前规范与验证边界见 [设计系统](design-system.md)、[重构进度](gvideo3-progress.md) 与 [Phase 6 验收报告](gvideo3-phase6-acceptance.md)。没有新的正式 Release Tag，未部署生产环境。
+- `v1.0.0` tag 与 release notes 已于 2026-09-15 发布，是历史工程版本；[工程案例](case-study.md) 保留其原始交付快照，不代表 UI 3.0 正式发布。
 - 维护队列（计划内、按需触发）：
   - 存储配额可观测性（超配额指标、字幕字节计量、`processing` 卡死的人工释放流程）。
   - frontend/nginx 容器降权（nginx-unprivileged，涉及端口映射变更与运行态演练）。

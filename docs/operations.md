@@ -34,28 +34,43 @@ go run ./cmd/server
 
 ## 完整验收
 
+**这是会写入数据的验收，不是只读健康检查。** 运行前必须确认独立 Compose 项目、独立数据库和媒体卷、目标端口及 `FRONTEND_URL`。禁止指向原开发库或生产库；默认 `8088` 和 Vite `5173` 共用开发数据。`acceptance.ps1` 不会自动创建隔离环境，改变 URL 也不能证明底层存储已隔离。
+
 首次运行浏览器验收前安装 Chromium：
 
 ```powershell
 cd frontend
 npx playwright install chromium chromium-headless-shell
 cd ..
-.\scripts\acceptance.ps1
 ```
+
+已确认隔离环境后，显式指定实际地址。例如 Phase 6 专用环境使用前端 `18088`、后端 `18080`；下列命令只运行验收，不负责启动或初始化该环境：
+
+```powershell
+$env:E2E_DISPOSABLE = "true"
+# 运行前将 E2E_MEDIA_VIDEO_ID 设置为隔离库中实际 ready 的视频 ID。
+# 播放回归会 seek/续播，媒体长度须覆盖既有用例中的播放与恢复位置。
+.\scripts\acceptance.ps1 `
+  -BaseURL http://127.0.0.1:18088 `
+  -BackendHealthURL http://127.0.0.1:18080/healthz `
+  -SkipCapacityCheck
+```
+
+当前 `final-qa-stateful.spec.ts` 仅在 `E2E_DISPOSABLE=true` 时执行真实持久旅程，并断言专用端口为 `18088`；播放用例通过 `E2E_MEDIA_VIDEO_ID` 选择实际媒体。不要修改断言来适配原开发库。`-SkipCapacityCheck` 用于此独立项目示例，因为容量脚本默认检查仓库根 Compose；独立卷仍须自行核对容量。使用完毕后清除仅为本轮设置的 E2E 环境变量，避免后续误指向其他环境。
 
 验收覆盖健康检查、容量检查、注册登录、上传、媒体处理、Range、HLS、字幕、关注、点赞、收藏、评论、通知、CSRF，以及桌面与移动浏览器流程。字幕管理会断言只存在于 `/me/videos`。
 
 常用参数：
 
-```powershell
-.\scripts\acceptance.ps1 -SkipBuildChecks
-.\scripts\acceptance.ps1 -SkipCapacityCheck
-.\scripts\acceptance.ps1 -IncludeBackupRestore
-.\scripts\acceptance.ps1 -IncludeBackupRestore -KeepDrillBackup
-.\scripts\acceptance.ps1 -BaseURL https://video.example.com
-```
+| 参数 | 作用与边界 |
+| --- | --- |
+| `-BaseURL` / `-BackendHealthURL` | 显式指定已核对的隔离前端与后端健康检查地址 |
+| `-SkipBuildChecks` | 跳过综合工程检查，不会取消数据写入 |
+| `-SkipCapacityCheck` | 跳过默认 Compose 容量检查，独立卷需另行确认 |
+| `-IncludeBackupRestore` | 增加备份恢复演练；先核对备份与恢复脚本的 Compose/卷目标，不能仅靠 BaseURL 隔离 |
+| `-KeepDrillBackup` | 与备份恢复演练配合，保留演练备份 |
 
-API 验收会删除本轮视频、字幕、评论和互动。由于当前没有安全的用户删除接口，随机验收账号会保留。
+API 验收会注册账号、上传视频与字幕、修改互动和通知，并删除本轮视频、字幕、评论和互动。由于当前没有安全的用户删除接口，随机验收账号会保留；Playwright 的写入范围也不能当成只读。隔离环境的完整 QA 不证明所有真实数据库写入、Safari/native HLS 或生产 HTTPS/TLS 已验证，RC 边界见 [Phase 6 报告](gvideo3-phase6-acceptance.md)。
 
 ## 容量检查
 

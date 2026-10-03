@@ -2,7 +2,7 @@
 
 ## 当前实施状态
 
-2026-10-03：Phase 1–5 已完成并通过用户验收，Phase 5 发布基线为 main `af48544`。Phase 6 只修明确缺陷并验证系统；当前不改变页面布局、默认主题或业务范围，验收证据见 `docs/gvideo3-phase6-acceptance.md`。
+2026-10-03：Phase 1–6 已完成并通过最终工程与视觉验收，Phase 6 经 PR #43 squash merge，UI Release Candidate 基线为 main `e2c3a63`。本轮 UI 重构已封版，不需要 Phase 6.1；验收证据与未验证范围见 [Phase 6 报告](gvideo3-phase6-acceptance.md)。未创建新的正式 Release Tag，未部署生产环境。
 
 本规范以 `GVideo_3_UI_Kit/` 与本次用户提示词为准，替代旧版本横向频道条和桌面无品牌轨的规则。视觉系统保持 dark-first，默认产品行为仍为浅色。界面使用真实 API；参考 PNG 只提供视觉构图，不能成为数据来源。
 
@@ -22,7 +22,7 @@ Auth 外壳独立，保留 `/auth`、登录注册与 next 回跳。三种外壳�
 
 ## 主题与语义令牌
 
-无合法保存偏好时默认浅色。已有 `gvideo-theme=light|dark` 始终优先。视觉系统保持 dark-first；是否更改产品默认主题留到 Phase 6 完整验收后决定。外部 `public/theme-init.js` 在应用加载前设置主题及浏览器主题色，保持生产 CSP 禁止内联脚本的约束。
+无合法保存偏好时默认浅色。已有 `gvideo-theme=light|dark` 始终优先。视觉系统保持 dark-first；Phase 6 最终验收已正式选择 **OPTION A：默认保持 Light**。外部 `public/theme-init.js` 在应用加载前设置主题及浏览器主题色，保持生产 CSP 禁止内联脚本的约束。
 
 | 角色 | 深色 | 浅色 |
 | --- | --- | --- |
